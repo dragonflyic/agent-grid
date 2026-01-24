@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "agent-grid"
+version = "0.1.0"
+description = "Agent orchestration system for coding agents"
+authors = ["Agent Grid Team"]
+readme = "README.md"
+packages = [{include = "agent_grid", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.115"
+uvicorn = "^0.34"
+httpx = "^0.28"
+pydantic = "^2.10"
+pydantic-settings = "^2.7"
+claude-code-sdk = "^0.0.25"
+asyncpg = "^0.30"
+pyyaml = "^6.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-asyncio = "^0.24"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+agent-grid = "agent_grid.main:run"
