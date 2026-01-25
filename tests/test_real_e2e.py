@@ -15,7 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_grid.common.models import AgentExecution, ExecutionStatus, IssueStatus
+from agent_grid.execution_grid import AgentExecution, ExecutionStatus
+from agent_grid.issue_tracker import IssueStatus
 from agent_grid.execution_grid.agent_runner import AgentRunner
 from agent_grid.execution_grid.repo_manager import RepoManager
 from agent_grid.issue_tracker.github_client import GitHubClient

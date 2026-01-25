@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_grid.common.models import IssueInfo, IssueStatus
+from agent_grid.issue_tracker import IssueInfo, IssueStatus
 from agent_grid.issue_tracker.filesystem_client import FilesystemClient
 
 

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Database
-    database_url: str = "postgresql://postgres:dev@localhost:5432/agent_grid"
+    database_url: str = "postgresql://postgres:dev@localhost:5433/agent_grid"
 
     # Issue tracker
     issue_tracker_type: Literal["github", "filesystem"] = "filesystem"
@@ -37,6 +37,12 @@ class Settings(BaseSettings):
 
     # Management loop
     management_loop_interval_seconds: int = 300  # 5 minutes
+
+    # Agent execution
+    agent_bypass_permissions: bool = True  # Use bypassPermissions mode for autonomous agents (required for non-interactive execution)
+
+    # Testing overrides (for development/testing only)
+    test_force_planning_only: bool = False  # Force agents to only create subissues, not write code
 
     model_config = {"env_prefix": "AGENT_GRID_"}
 

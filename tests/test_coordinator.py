@@ -3,7 +3,8 @@
 import pytest
 from uuid import uuid4
 
-from agent_grid.common.models import NudgeRequest, AgentExecution, ExecutionStatus
+from agent_grid.coordinator import NudgeRequest
+from agent_grid.execution_grid import AgentExecution, ExecutionStatus
 
 
 class TestNudgeRequest:

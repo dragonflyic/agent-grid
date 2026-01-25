@@ -1,19 +1,57 @@
-"""Public API for coordinator module - FastAPI routes."""
+"""Public API for coordinator module.
 
+This module defines the public interface and models for the coordinator.
+Contains FastAPI routes and request/response models.
+"""
+
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
-from ..common.models import (
-    AgentExecution,
-    ExecutionStatus,
-    NudgeRequest,
-    NudgeRequestCreate,
-)
-from .budget_manager import get_budget_manager
-from .database import get_database
-from .nudge_handler import get_nudge_handler
+from ..execution_grid import AgentExecution, ExecutionStatus
+
+
+# =============================================================================
+# Utilities
+# =============================================================================
+
+def utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
+
+# =============================================================================
+# Models
+# =============================================================================
+
+class NudgeRequest(BaseModel):
+    """A request from an agent to nudge another issue/agent."""
+
+    id: UUID
+    issue_id: str
+    source_execution_id: UUID | None = None
+    priority: int = 0
+    reason: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    processed_at: datetime | None = None
+
+
+class NudgeRequestCreate(BaseModel):
+    """Request to create a nudge."""
+
+    issue_id: str
+    repo: str | None = None  # Repository in owner/name format
+    source_execution_id: UUID | None = None
+    priority: int = 0
+    reason: str | None = None
+
+
+# =============================================================================
+# API Routes
+# =============================================================================
 
 coordinator_router = APIRouter(prefix="/api", tags=["coordinator"])
 
@@ -43,6 +81,7 @@ async def list_executions(
     Returns:
         List of matching executions.
     """
+    from .database import get_database
     db = get_database()
     return await db.list_executions(
         status=status,
@@ -66,6 +105,7 @@ async def get_execution(execution_id: UUID) -> AgentExecution:
     Raises:
         HTTPException: If execution not found.
     """
+    from .database import get_database
     db = get_database()
     execution = await db.get_execution(execution_id)
     if not execution:
@@ -86,9 +126,11 @@ async def create_nudge(request: NudgeRequestCreate) -> NudgeRequest:
     Returns:
         The created nudge request.
     """
+    from .nudge_handler import get_nudge_handler
     handler = get_nudge_handler()
     return await handler.handle_nudge(
         issue_id=request.issue_id,
+        repo=request.repo,
         source_execution_id=request.source_execution_id,
         priority=request.priority,
         reason=request.reason,
@@ -106,6 +148,7 @@ async def list_pending_nudges(limit: int = 10) -> list[NudgeRequest]:
     Returns:
         List of pending nudge requests.
     """
+    from .nudge_handler import get_nudge_handler
     handler = get_nudge_handler()
     return await handler.get_pending_nudges(limit)
 
@@ -118,5 +161,6 @@ async def get_budget_status() -> dict[str, Any]:
     Returns:
         Budget status including concurrent executions and resource usage.
     """
+    from .budget_manager import get_budget_manager
     manager = get_budget_manager()
     return await manager.get_budget_status()

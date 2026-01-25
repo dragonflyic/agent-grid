@@ -4,7 +4,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from agent_grid.common.models import IssueStatus
+from agent_grid.issue_tracker import IssueStatus
 from agent_grid.issue_tracker.github_client import GitHubClient
 
 

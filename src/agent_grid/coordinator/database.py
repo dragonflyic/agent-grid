@@ -5,7 +5,8 @@ from uuid import UUID
 
 import asyncpg
 
-from ..common.models import AgentExecution, ExecutionStatus, NudgeRequest, utc_now
+from ..execution_grid import AgentExecution, ExecutionStatus
+from .public_api import NudgeRequest, utc_now
 from ..config import settings
 
 

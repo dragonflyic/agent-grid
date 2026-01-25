@@ -2,8 +2,8 @@
 
 from uuid import UUID, uuid4
 
-from ..common import event_bus, EventType
-from ..common.models import NudgeRequest
+from ..execution_grid import event_bus, EventType
+from .public_api import NudgeRequest
 from .database import get_database
 
 
@@ -20,6 +20,7 @@ class NudgeHandler:
     async def handle_nudge(
         self,
         issue_id: str,
+        repo: str | None = None,
         source_execution_id: UUID | None = None,
         priority: int = 0,
         reason: str | None = None,
@@ -29,6 +30,7 @@ class NudgeHandler:
 
         Args:
             issue_id: The issue to nudge.
+            repo: Repository in owner/name format.
             source_execution_id: Optional ID of the execution that requested the nudge.
             priority: Priority level (higher = more urgent).
             reason: Optional reason for the nudge.
@@ -53,6 +55,7 @@ class NudgeHandler:
             {
                 "nudge_id": str(nudge.id),
                 "issue_id": issue_id,
+                "repo": repo,
                 "source_execution_id": str(source_execution_id) if source_execution_id else None,
                 "priority": priority,
                 "reason": reason,

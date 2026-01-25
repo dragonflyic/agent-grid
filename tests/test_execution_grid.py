@@ -3,7 +3,7 @@
 import pytest
 from uuid import uuid4
 
-from agent_grid.common.models import AgentExecution, ExecutionStatus
+from agent_grid.execution_grid import AgentExecution, ExecutionStatus
 from agent_grid.execution_grid.repo_manager import RepoManager
 from agent_grid.execution_grid.event_publisher import ExecutionEventPublisher
 

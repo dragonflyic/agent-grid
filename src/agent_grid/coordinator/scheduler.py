@@ -1,10 +1,18 @@
 """Scheduler for deciding when to launch agents."""
 
+import logging
 from uuid import UUID
 
-from ..common import event_bus, Event, EventType
-from ..common.models import ExecutionStatus, AgentExecution
-from ..execution_grid import launch_agent
+from ..execution_grid import (
+    event_bus,
+    get_execution_grid,
+    AgentExecution,
+    Event,
+    EventType,
+    ExecutionStatus,
+)
+
+logger = logging.getLogger("agent_grid.scheduler")
 from ..issue_tracker import get_issue_tracker
 from .budget_manager import get_budget_manager
 from .database import get_database
@@ -74,8 +82,10 @@ class Scheduler:
         payload = event.payload
         issue_id = payload.get("issue_id")
         repo = payload.get("repo")
+        logger.info(f"Handling nudge request: issue_id={issue_id}, repo={repo}")
 
         if not issue_id:
+            logger.warning("Nudge request missing issue_id")
             return
 
         # If repo not provided, try to get it from nudge source
@@ -136,21 +146,26 @@ class Scheduler:
         Returns:
             Execution ID if launched, None otherwise.
         """
+        logger.info(f"Attempting to launch agent: issue_id={issue_id}, repo={repo}")
+
         # Check budget
         can_launch, reason = await self._budget_manager.can_launch_agent()
         if not can_launch:
+            logger.warning(f"Budget check failed: {reason}")
             return None
 
         # Check if already running for this issue
         existing = await self._db.get_execution_for_issue(issue_id)
         if existing and existing.status == ExecutionStatus.RUNNING:
+            logger.info(f"Execution already running for issue {issue_id}")
             return None
 
         # Get issue details
         tracker = get_issue_tracker()
         try:
             issue = await tracker.get_issue(repo, issue_id)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to get issue {issue_id} from {repo}: {e}")
             return None
 
         # Generate prompt
@@ -158,7 +173,9 @@ class Scheduler:
 
         # Launch agent
         repo_url = f"https://github.com/{repo}.git"
-        execution_id = await launch_agent(issue_id, repo_url, prompt)
+        grid = get_execution_grid()
+        execution_id = await grid.launch_agent(issue_id, repo_url, prompt)
+        logger.info(f"Launched agent {execution_id} for issue {issue_id}")
 
         # Record in database
         execution = AgentExecution(
@@ -191,7 +208,6 @@ class Scheduler:
 
     def _should_auto_launch(self, labels: list[str]) -> bool:
         """Determine if an issue should auto-launch an agent."""
-        # Auto-launch for issues with 'agent' or 'automated' labels
         trigger_labels = {"agent", "automated", "agent-grid"}
         return bool(set(labels) & trigger_labels)
 

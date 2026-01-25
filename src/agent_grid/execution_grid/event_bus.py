@@ -3,7 +3,7 @@
 import asyncio
 from typing import Callable, Awaitable
 
-from .models import Event, EventType, utc_now
+from .public_api import Event, EventType, utc_now
 from ..config import settings
 
 
