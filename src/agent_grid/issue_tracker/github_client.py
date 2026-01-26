@@ -5,30 +5,28 @@ from datetime import datetime
 
 import httpx
 
-from ..common.models import Comment, IssueInfo, IssueStatus
 from ..config import settings
-from .public_api import IssueTracker
+from .public_api import Comment, IssueInfo, IssueStatus, IssueTracker
 
 
 class GitHubClient(IssueTracker):
     """
     GitHub implementation of the issue tracker interface.
 
-    Conventions used for relationships (stored in issue body):
-    - Parent reference: "Parent: #123" on its own line
+    Uses GitHub's first-class sub-issues API for parent/child relationships.
+    See: https://docs.github.com/en/rest/issues/sub-issues
+
+    Conventions for blocking relationships (stored in issue body):
     - Blocked by: "Blocked by: #1, #2, #3" on its own line
 
     Labels used:
-    - "subissue": marks an issue as a subissue
     - "in-progress": marks an issue as in progress
     """
 
     BASE_URL = "https://api.github.com"
-    SUBISSUE_LABEL = "subissue"
     IN_PROGRESS_LABEL = "in-progress"
 
-    # Regex patterns for parsing relationships from issue body
-    PARENT_PATTERN = re.compile(r"^Parent:\s*#(\d+)\s*$", re.MULTILINE)
+    # Regex patterns for parsing blocking relationships from issue body
     BLOCKED_BY_PATTERN = re.compile(r"^Blocked by:\s*(.+)$", re.MULTILINE)
     ISSUE_REF_PATTERN = re.compile(r"#(\d+)")
 
@@ -45,16 +43,30 @@ class GitHubClient(IssueTracker):
         )
 
     async def get_issue(self, repo: str, issue_id: str) -> IssueInfo:
-        """Get information about a GitHub issue including comments."""
+        """Get information about a GitHub issue including comments and parent."""
         # Fetch issue
         response = await self._client.get(f"/repos/{repo}/issues/{issue_id}")
         response.raise_for_status()
         data = response.json()
 
+        # Fetch parent issue if this is a sub-issue
+        parent_id = await self._fetch_parent_id(repo, issue_id)
+
         # Fetch comments
         comments = await self._fetch_comments(repo, issue_id)
 
-        return self._parse_issue(repo, data, comments=comments)
+        return self._parse_issue(repo, data, comments=comments, parent_id=parent_id)
+
+    async def _fetch_parent_id(self, repo: str, issue_id: str) -> str | None:
+        """Fetch the parent issue ID using GitHub's sub-issues API."""
+        try:
+            response = await self._client.get(f"/repos/{repo}/issues/{issue_id}/parent")
+            if response.status_code == 200:
+                parent_data = response.json()
+                return str(parent_data["number"])
+        except httpx.HTTPStatusError:
+            pass
+        return None
 
     async def _fetch_comments(self, repo: str, issue_id: str) -> list[Comment]:
         """Fetch all comments for an issue."""
@@ -130,27 +142,28 @@ class GitHubClient(IssueTracker):
         return issues
 
     async def list_subissues(self, repo: str, parent_id: str) -> list[IssueInfo]:
-        """List all subissues of a parent issue."""
-        # Get issues with subissue label
-        response = await self._client.get(
-            f"/repos/{repo}/issues",
-            params={
-                "labels": self.SUBISSUE_LABEL,
-                "state": "all",
-                "per_page": 100,
-            },
-        )
-        response.raise_for_status()
-
+        """List all subissues of a parent issue using GitHub's sub-issues API."""
         subissues = []
+        page = 1
 
-        for data in response.json():
-            if "pull_request" in data:
-                continue
+        while True:
+            response = await self._client.get(
+                f"/repos/{repo}/issues/{parent_id}/sub_issues",
+                params={"per_page": 100, "page": page},
+            )
+            response.raise_for_status()
+            data = response.json()
 
-            issue = self._parse_issue(repo, data)
-            if issue.parent_id == parent_id:
+            if not data:
+                break
+
+            for item in data:
+                issue = self._parse_issue(repo, item, parent_id=parent_id)
                 subissues.append(issue)
+
+            if len(data) < 100:
+                break
+            page += 1
 
         return subissues
 
@@ -160,24 +173,18 @@ class GitHubClient(IssueTracker):
         title: str,
         body: str,
         labels: list[str] | None = None,
-        parent_id: str | None = None,
         blocked_by: list[str] | None = None,
     ) -> IssueInfo:
         """Create a new issue."""
-        # Build body with relationship metadata
-        full_body = self._build_body(body, parent_id, blocked_by)
-
-        # Build labels
-        all_labels = list(labels) if labels else []
-        if parent_id and self.SUBISSUE_LABEL not in all_labels:
-            all_labels.append(self.SUBISSUE_LABEL)
+        # Build body with blocking metadata (parent is handled via sub-issues API)
+        full_body = self._build_body(body, blocked_by)
 
         response = await self._client.post(
             f"/repos/{repo}/issues",
             json={
                 "title": title,
                 "body": full_body,
-                "labels": all_labels if all_labels else None,
+                "labels": labels if labels else None,
             },
         )
         response.raise_for_status()
@@ -193,14 +200,34 @@ class GitHubClient(IssueTracker):
         body: str,
         labels: list[str] | None = None,
     ) -> IssueInfo:
-        """Create a subissue under a parent issue."""
-        return await self.create_issue(
-            repo=repo,
-            title=title,
-            body=body,
-            labels=labels,
-            parent_id=parent_id,
+        """Create a subissue under a parent issue using GitHub's sub-issues API."""
+        # First create the issue and get the raw response to extract GitHub's issue ID
+        full_body = self._build_body(body, None)
+
+        create_response = await self._client.post(
+            f"/repos/{repo}/issues",
+            json={
+                "title": title,
+                "body": full_body,
+                "labels": labels if labels else None,
+            },
         )
+        create_response.raise_for_status()
+        issue_data = create_response.json()
+
+        # Get the GitHub issue ID (not the number)
+        github_issue_id = issue_data["id"]
+
+        # Add it as a sub-issue to the parent using the GitHub ID
+        response = await self._client.post(
+            f"/repos/{repo}/issues/{parent_id}/sub_issues",
+            json={"sub_issue_id": github_issue_id},
+        )
+        response.raise_for_status()
+
+        # Return the parsed issue with parent_id set
+        issue = self._parse_issue(repo, issue_data, parent_id=parent_id)
+        return issue
 
     async def update_issue(
         self,
@@ -210,10 +237,12 @@ class GitHubClient(IssueTracker):
         body: str | None = None,
         status: IssueStatus | None = None,
         labels: list[str] | None = None,
-        parent_id: str | None = None,
         blocked_by: list[str] | None = None,
     ) -> IssueInfo:
-        """Update an issue's fields."""
+        """Update an issue's fields.
+
+        Note: parent_id is managed via GitHub's sub-issues API, not here.
+        """
         # Get current issue to preserve unspecified fields
         current = await self.get_issue(repo, issue_id)
 
@@ -222,14 +251,11 @@ class GitHubClient(IssueTracker):
         if title is not None:
             update_data["title"] = title
 
-        # Handle body update - need to preserve/update relationship metadata
-        if body is not None or parent_id is not None or blocked_by is not None:
-            # Use provided values or fall back to current
+        # Handle body update - need to preserve/update blocking metadata
+        if body is not None or blocked_by is not None:
             new_body = body if body is not None else self._strip_metadata(current.body or "")
-            new_parent = parent_id if parent_id is not None else current.parent_id
             new_blocked = blocked_by if blocked_by is not None else current.blocked_by
-
-            update_data["body"] = self._build_body(new_body, new_parent, new_blocked)
+            update_data["body"] = self._build_body(new_body, new_blocked)
 
         if status is not None:
             update_data["state"] = "closed" if status == IssueStatus.CLOSED else "open"
@@ -319,15 +345,10 @@ class GitHubClient(IssueTracker):
     def _build_body(
         self,
         body: str,
-        parent_id: str | None,
         blocked_by: list[str] | None,
     ) -> str:
-        """Build issue body with relationship metadata."""
+        """Build issue body with blocking metadata."""
         parts = []
-
-        # Add parent reference
-        if parent_id:
-            parts.append(f"Parent: #{parent_id}")
 
         # Add blocked by references
         if blocked_by:
@@ -345,8 +366,6 @@ class GitHubClient(IssueTracker):
 
     def _strip_metadata(self, body: str) -> str:
         """Strip relationship metadata from issue body."""
-        # Remove Parent: line
-        body = self.PARENT_PATTERN.sub("", body)
         # Remove Blocked by: line
         body = self.BLOCKED_BY_PATTERN.sub("", body)
         # Clean up extra whitespace at the start
@@ -357,6 +376,7 @@ class GitHubClient(IssueTracker):
         repo: str,
         data: dict,
         comments: list[Comment] | None = None,
+        parent_id: str | None = None,
     ) -> IssueInfo:
         """Parse GitHub API response into IssueInfo."""
         labels = [label["name"] for label in data.get("labels", [])]
@@ -370,12 +390,6 @@ class GitHubClient(IssueTracker):
             status = IssueStatus.IN_PROGRESS
         else:
             status = IssueStatus.OPEN
-
-        # Parse parent_id from body
-        parent_id = None
-        parent_match = self.PARENT_PATTERN.search(body)
-        if parent_match:
-            parent_id = parent_match.group(1)
 
         # Parse blocked_by from body
         blocked_by: list[str] = []

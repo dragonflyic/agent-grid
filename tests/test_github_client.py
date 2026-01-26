@@ -4,7 +4,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from agent_grid.common.models import IssueStatus
+from agent_grid.issue_tracker import IssueStatus
 from agent_grid.issue_tracker.github_client import GitHubClient
 
 
@@ -18,13 +18,11 @@ class TestGitHubClientParsing:
             client = GitHubClient.__new__(GitHubClient)
             client._token = "dummy"
             client._client = None
-            # Set up the patterns
+            # Set up the patterns (parent_id is now from sub-issues API, not body)
             import re
-            client.PARENT_PATTERN = re.compile(r"^Parent:\s*#(\d+)\s*$", re.MULTILINE)
             client.BLOCKED_BY_PATTERN = re.compile(r"^Blocked by:\s*(.+)$", re.MULTILINE)
             client.ISSUE_REF_PATTERN = re.compile(r"#(\d+)")
             client.IN_PROGRESS_LABEL = "in-progress"
-            client.SUBISSUE_LABEL = "subissue"
             return client
 
     def test_parse_issue_basic(self, client):
@@ -51,11 +49,11 @@ class TestGitHubClientParsing:
         assert issue.blocked_by == []
 
     def test_parse_issue_with_parent(self, client):
-        """Test parsing issue with parent reference."""
+        """Test parsing issue with parent_id passed directly (from sub-issues API)."""
         data = {
             "number": 2,
             "title": "Child Issue",
-            "body": "Parent: #1\n\nChild description",
+            "body": "Child description",
             "state": "open",
             "labels": [{"name": "subissue"}],
             "html_url": "https://github.com/test/repo/issues/2",
@@ -63,7 +61,8 @@ class TestGitHubClientParsing:
             "updated_at": "2024-01-15T10:00:00Z",
         }
 
-        issue = client._parse_issue("test/repo", data)
+        # parent_id is now passed directly from sub-issues API, not parsed from body
+        issue = client._parse_issue("test/repo", data, parent_id="1")
 
         assert issue.parent_id == "1"
         assert issue.body == "Child description"
@@ -87,11 +86,11 @@ class TestGitHubClientParsing:
         assert issue.body == "This is blocked"
 
     def test_parse_issue_with_all_metadata(self, client):
-        """Test parsing issue with parent and blocked_by."""
+        """Test parsing issue with parent_id (from API) and blocked_by (from body)."""
         data = {
             "number": 4,
             "title": "Complex Issue",
-            "body": "Parent: #1\nBlocked by: #2, #3\n\nActual description",
+            "body": "Blocked by: #2, #3\n\nActual description",
             "state": "open",
             "labels": [{"name": "subissue"}],
             "html_url": "https://github.com/test/repo/issues/4",
@@ -99,7 +98,8 @@ class TestGitHubClientParsing:
             "updated_at": "2024-01-15T10:00:00Z",
         }
 
-        issue = client._parse_issue("test/repo", data)
+        # parent_id is now passed directly from sub-issues API
+        issue = client._parse_issue("test/repo", data, parent_id="1")
 
         assert issue.parent_id == "1"
         assert issue.blocked_by == ["2", "3"]
@@ -141,27 +141,18 @@ class TestGitHubClientParsing:
 
     def test_build_body_basic(self, client):
         """Test building body without metadata."""
-        body = client._build_body("Description", None, None)
+        body = client._build_body("Description", None)
         assert body == "Description"
-
-    def test_build_body_with_parent(self, client):
-        """Test building body with parent."""
-        body = client._build_body("Description", "1", None)
-        assert body == "Parent: #1\n\nDescription"
 
     def test_build_body_with_blocked_by(self, client):
         """Test building body with blocked_by."""
-        body = client._build_body("Description", None, ["1", "2"])
+        body = client._build_body("Description", ["1", "2"])
         assert body == "Blocked by: #1, #2\n\nDescription"
-
-    def test_build_body_with_all(self, client):
-        """Test building body with all metadata."""
-        body = client._build_body("Description", "1", ["2", "3"])
-        assert body == "Parent: #1\nBlocked by: #2, #3\n\nDescription"
 
     def test_strip_metadata(self, client):
         """Test stripping metadata from body."""
-        body = "Parent: #1\nBlocked by: #2, #3\n\nActual content"
+        # Only strips "Blocked by:" now (parent is managed via sub-issues API)
+        body = "Blocked by: #2, #3\n\nActual content"
         stripped = client._strip_metadata(body)
         assert stripped == "Actual content"
 

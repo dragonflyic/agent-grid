@@ -1,9 +1,66 @@
-"""Public API for issue tracker abstraction."""
+"""Public API for issue tracker module.
+
+This module defines the public interface and models for the issue tracker.
+Implementation modules import from here, not the other way around.
+"""
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from enum import Enum
 
-from ..common.models import IssueInfo, IssueStatus
+from pydantic import BaseModel, Field
 
+
+# =============================================================================
+# Utilities
+# =============================================================================
+
+def utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
+
+# =============================================================================
+# Models
+# =============================================================================
+
+class IssueStatus(str, Enum):
+    """Status of an issue."""
+
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    CLOSED = "closed"
+
+
+class Comment(BaseModel):
+    """A comment on an issue."""
+
+    id: str
+    body: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class IssueInfo(BaseModel):
+    """Information about an issue from the issue tracker."""
+
+    id: str
+    number: int
+    title: str
+    body: str | None = None
+    status: IssueStatus = IssueStatus.OPEN
+    labels: list[str] = Field(default_factory=list)
+    repo_url: str
+    html_url: str
+    parent_id: str | None = None
+    blocked_by: list[str] = Field(default_factory=list)
+    comments: list[Comment] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# =============================================================================
+# Service Interface (ABC)
+# =============================================================================
 
 class IssueTracker(ABC):
     """Abstract interface for issue tracking systems."""
@@ -91,6 +148,10 @@ class IssueTracker(ABC):
         """Close any open connections."""
         pass
 
+
+# =============================================================================
+# Service Factory
+# =============================================================================
 
 # Singleton instance
 _issue_tracker: IssueTracker | None = None

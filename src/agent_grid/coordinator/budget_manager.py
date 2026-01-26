@@ -1,6 +1,6 @@
 """Budget and safety controls for agent executions."""
 
-from ..common.models import ExecutionStatus
+from ..execution_grid import ExecutionStatus
 from ..config import settings
 from .database import get_database
 

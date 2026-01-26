@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from agent_grid.common import event_bus, EventType
-from agent_grid.common.models import ExecutionStatus, IssueStatus
+from agent_grid.execution_grid import event_bus, EventType, ExecutionStatus
+from agent_grid.issue_tracker import IssueStatus
 from agent_grid.coordinator.database import Database
 from agent_grid.coordinator.scheduler import Scheduler
 from agent_grid.coordinator.nudge_handler import NudgeHandler
@@ -126,7 +126,7 @@ class TestEndToEnd:
         assert issue.status == IssueStatus.OPEN
 
         # Track events received using a fresh event bus
-        from agent_grid.common.event_bus import EventBus
+        from agent_grid.execution_grid import EventBus
         test_event_bus = EventBus()
         events_received = []
 
@@ -189,7 +189,7 @@ class TestEndToEnd:
             repo_manager.push_branch = mock_push
 
             # Create execution
-            from agent_grid.common.models import AgentExecution
+            from agent_grid.execution_grid import AgentExecution
             execution = AgentExecution(
                 id=uuid4(),
                 issue_id=issue.id,
@@ -327,7 +327,7 @@ class TestEndToEnd:
     @pytest.mark.asyncio
     async def test_budget_manager_limits_concurrent(self, mock_db):
         """Test that budget manager enforces concurrent execution limits."""
-        from agent_grid.common.models import AgentExecution
+        from agent_grid.execution_grid import AgentExecution
 
         budget_manager = BudgetManager(max_concurrent=2)
         budget_manager._db = mock_db
@@ -354,7 +354,7 @@ class TestEndToEnd:
     @pytest.mark.asyncio
     async def test_event_flow(self, temp_dirs):
         """Test that events flow correctly through the system."""
-        from agent_grid.common.event_bus import EventBus
+        from agent_grid.execution_grid import EventBus
 
         # Create a fresh event bus for this test to avoid event loop issues
         test_bus = EventBus()

@@ -1,21 +1,32 @@
 """FastAPI entry point for Agent Grid."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI
 
-from .common import event_bus
+# Configure logging for agent event streaming
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Ensure agent event logger is visible
+logging.getLogger("agent_grid.agent").setLevel(logging.INFO)
+
+from .execution_grid import event_bus
 from .config import settings
 from .coordinator import (
     coordinator_router,
     get_database,
     get_management_loop,
     get_scheduler,
+    get_agent_event_logger,
 )
-from .issue_tracker import webhook_router, get_issue_tracker
+from .issue_tracker import webhook_router, issues_router, get_issue_tracker
 
 
 @asynccontextmanager
@@ -36,9 +47,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     management_loop = get_management_loop()
     await management_loop.start()
 
+    # Start agent event logger for real-time streaming
+    agent_logger = get_agent_event_logger()
+    await agent_logger.start()
+
     yield
 
     # Shutdown
+    await agent_logger.stop()
     await management_loop.stop()
     await scheduler.stop()
     await event_bus.stop()
@@ -59,6 +75,7 @@ app = FastAPI(
 # Register routers
 app.include_router(coordinator_router)
 app.include_router(webhook_router)
+app.include_router(issues_router)
 
 
 @app.get("/")

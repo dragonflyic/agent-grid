@@ -7,9 +7,8 @@ from pathlib import Path
 
 import yaml
 
-from ..common.models import Comment, IssueInfo, IssueStatus, utc_now
 from ..config import settings
-from .public_api import IssueTracker
+from .public_api import Comment, IssueInfo, IssueStatus, IssueTracker, utc_now
 
 
 class FilesystemClient(IssueTracker):
