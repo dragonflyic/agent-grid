@@ -1,0 +1,29 @@
+# Spacelift configuration for Agent Grid
+
+version: "1"
+
+# Main stack for dev environment
+stacks:
+  agent-grid-dev:
+    name: "Agent Grid - Dev"
+    project_root: "infrastructure/terraform/environments/dev"
+    branch: "main"
+
+    # Terraform settings
+    terraform_version: "1.7.0"
+
+    # Auto-deploy on push to main
+    autodeploy: true
+
+    # Manual approval for destroys
+    auto_destroy: false
+
+    # Environment variables (configure in Spacelift UI)
+    # TF_VAR_database_password: (sensitive - set in Spacelift)
+    # TF_VAR_github_token: (sensitive - set in Spacelift)
+    # TF_VAR_github_webhook_secret: (sensitive - set in Spacelift)
+
+    # Labels for organization
+    labels:
+      - "environment:dev"
+      - "project:agent-grid"

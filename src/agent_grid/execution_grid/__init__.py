@@ -14,6 +14,8 @@ from .public_api import (
 )
 from .service import get_execution_grid, ExecutionGridService
 from .event_bus import EventBus, event_bus
+from .sqs_client import SQSClient, get_sqs_client, JobRequest, JobResult
+from .sqs_grid import ExecutionGridClient, get_sqs_execution_grid
 
 __all__ = [
     # Public API - Models
@@ -31,4 +33,12 @@ __all__ = [
     # Event bus (for startup/shutdown)
     "EventBus",
     "event_bus",
+    # SQS client (for hybrid deployment)
+    "SQSClient",
+    "get_sqs_client",
+    "JobRequest",
+    "JobResult",
+    # SQS-based execution grid (coordinator mode)
+    "ExecutionGridClient",
+    "get_sqs_execution_grid",
 ]

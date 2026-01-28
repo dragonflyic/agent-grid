@@ -1,0 +1,12 @@
+# Copy this file to terraform.tfvars and fill in the values
+# DO NOT commit terraform.tfvars to version control
+
+project_name = "agent-grid"
+aws_region   = "us-west-2"
+
+# Required: Database password (generate a strong one)
+database_password = "CHANGE_ME_TO_A_STRONG_PASSWORD"
+
+# Optional: GitHub integration
+# github_token          = "ghp_xxxx"
+# github_webhook_secret = "your-webhook-secret"

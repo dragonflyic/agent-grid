@@ -1,0 +1,31 @@
+variable "project_name" {
+  description = "Project name for resource naming"
+  type        = string
+  default     = "agent-grid"
+}
+
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-west-2"
+}
+
+variable "database_password" {
+  description = "Password for the database"
+  type        = string
+  sensitive   = true
+}
+
+variable "github_token" {
+  description = "GitHub personal access token"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "github_webhook_secret" {
+  description = "GitHub webhook secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

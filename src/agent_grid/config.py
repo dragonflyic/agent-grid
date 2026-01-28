@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     # Testing overrides (for development/testing only)
     test_force_planning_only: bool = False  # Force agents to only create subissues, not write code
 
+    # AWS/SQS Configuration (for hybrid deployment)
+    aws_region: str = "us-west-2"
+    sqs_job_queue_url: str = ""  # URL for job-requests queue
+    sqs_result_queue_url: str = ""  # URL for job-results queue
+    sqs_poll_interval_seconds: int = 5  # How often worker polls for jobs
+    sqs_visibility_timeout_seconds: int = 3600  # Match execution timeout
+
+    # Deployment mode
+    deployment_mode: Literal["local", "coordinator", "worker"] = "local"
+    # local: In-memory event bus, everything runs in same process (development)
+    # coordinator: Publishes jobs to SQS, listens for results (cloud)
+    # worker: Polls SQS for jobs, runs agents locally (desktop)
+
     model_config = {"env_prefix": "AGENT_GRID_"}
 
 
