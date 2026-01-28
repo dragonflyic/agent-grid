@@ -43,6 +43,7 @@ htmlcov/
 # Environment
 .env
 .env.local
+.env.worker
 
 # OS
 .DS_Store
@@ -52,3 +53,19 @@ Thumbs.db
 issues/
 /tmp/
 *.log
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+tfplan
+*.tfplan

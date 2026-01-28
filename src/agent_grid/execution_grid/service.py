@@ -1,6 +1,6 @@
 """Implementation of the ExecutionGrid service."""
 
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from .public_api import (
@@ -11,6 +11,10 @@ from .public_api import (
 )
 from .event_bus import event_bus
 from .agent_runner import get_agent_runner
+from ..config import settings
+
+if TYPE_CHECKING:
+    from .sqs_grid import ExecutionGridClient
 
 
 class ExecutionGridService(ExecutionGrid):
@@ -76,11 +80,28 @@ class ExecutionGridService(ExecutionGrid):
 
 # Global service instance
 _service: ExecutionGridService | None = None
+_sqs_grid: "ExecutionGridClient | None" = None
 
 
 def get_execution_grid() -> ExecutionGrid:
-    """Get the global execution grid service instance."""
-    global _service
-    if _service is None:
-        _service = ExecutionGridService()
-    return _service
+    """
+    Get the global execution grid service instance.
+
+    Returns different implementations based on deployment_mode:
+    - "local": In-memory service that runs agents directly
+    - "coordinator": SQS-based client that publishes jobs to queue
+    - "worker": Not used (worker has its own execution logic)
+    """
+    global _service, _sqs_grid
+
+    if settings.deployment_mode == "coordinator":
+        # SQS-based implementation for cloud coordinator
+        if _sqs_grid is None:
+            from .sqs_grid import ExecutionGridClient
+            _sqs_grid = ExecutionGridClient()
+        return _sqs_grid
+    else:
+        # Default: local in-memory implementation
+        if _service is None:
+            _service = ExecutionGridService()
+        return _service
