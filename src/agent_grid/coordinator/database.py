@@ -18,7 +18,12 @@ class Database:
         self._pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
-        """Establish database connection pool."""
+        """Establish database connection pool.
+
+        Note: Schema is managed by Alembic migrations. Run migrations before
+        starting the application:
+            alembic upgrade head
+        """
         self._pool = await asyncpg.create_pool(
             self._database_url,
             min_size=2,
