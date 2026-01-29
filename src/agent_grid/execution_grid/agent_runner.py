@@ -1,10 +1,14 @@
 """Agent runner using Claude Code SDK."""
 
 import asyncio
+import json
+import logging
 from pathlib import Path
 from uuid import UUID
 
 from claude_code_sdk import query
+
+logger = logging.getLogger("agent_grid.agent")
 from claude_code_sdk.types import (
     ClaudeCodeOptions,
     AssistantMessage,
@@ -152,6 +156,9 @@ class AgentRunner:
                 execution.issue_id,
                 execution.repo_url,
             )
+            exec_id = str(execution_id)[:8]
+            repo = execution.repo_url.replace("https://github.com/", "").replace(".git", "")
+            logger.info(f"[{exec_id}] 🚀 STARTED - issue={execution.issue_id} repo={repo}")
 
             # Run the agent
             result = await self._run_agent(execution_id, work_dir, prompt, execution)
@@ -170,6 +177,8 @@ class AgentRunner:
 
             # Publish completed event
             await event_publisher.agent_completed(execution_id, result)
+            preview = result[:100].replace("\n", " ") if result else "(no result)"
+            logger.info(f"[{exec_id}] ✅ COMPLETED - {preview}")
 
             # Cleanup if configured
             if settings.cleanup_on_success:
@@ -182,6 +191,8 @@ class AgentRunner:
 
             # Publish failed event
             await event_publisher.agent_failed(execution_id, str(e))
+            exec_id = str(execution_id)[:8]
+            logger.error(f"[{exec_id}] ❌ FAILED - {e}")
 
             # Cleanup if configured
             if settings.cleanup_on_failure:
@@ -231,15 +242,18 @@ class AgentRunner:
         # Collect output
         output_parts: list[str] = []
         final_result: str | None = None
+        exec_id = str(execution_id)[:8]
 
         async for message in query(prompt=prompt, options=options):
             if isinstance(message, SystemMessage):
                 # System messages (e.g., from Claude's initialization)
+                subtype = message.subtype if hasattr(message, "subtype") else "system"
                 await event_publisher.agent_chat(
                     execution_id,
                     message_type="system",
-                    content=message.subtype if hasattr(message, "subtype") else "system",
+                    content=subtype,
                 )
+                logger.info(f"[{exec_id}] ⚙️  System: {subtype}")
             elif isinstance(message, UserMessage):
                 # User messages (typically tool results being fed back)
                 for block in message.content:
@@ -254,6 +268,10 @@ class AgentRunner:
                             content=content,
                             tool_id=block.tool_use_id,
                         )
+                        preview = content[:150].replace("\n", " ")
+                        if len(content) > 150:
+                            preview += "..."
+                        logger.info(f"[{exec_id}] 📎 Result: {preview}")
             elif isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
@@ -270,9 +288,12 @@ class AgentRunner:
                             block.text[:200],
                             "text",
                         )
+                        # Log text
+                        for line in block.text.split("\n"):
+                            if line.strip():
+                                logger.info(f"[{exec_id}] 💬 {line}")
                     elif isinstance(block, ToolUseBlock):
                         # Include tool input in the log
-                        import json
                         tool_input = json.dumps(block.input, indent=2) if block.input else ""
                         await event_publisher.agent_chat(
                             execution_id,
@@ -286,6 +307,10 @@ class AgentRunner:
                             f"Using tool: {block.name}",
                             "tool",
                         )
+                        logger.info(f"[{exec_id}] 🔧 Tool: {block.name}")
+                        if tool_input and len(tool_input) < 200:
+                            for line in tool_input.split("\n"):
+                                logger.info(f"[{exec_id}]    {line}")
             elif isinstance(message, ResultMessage):
                 if message.result:
                     final_result = message.result
@@ -294,6 +319,10 @@ class AgentRunner:
                         message_type="result",
                         content=message.result,
                     )
+                    logger.info(f"[{exec_id}] 🏁 Final result:")
+                    for line in message.result.split("\n")[:10]:
+                        if line.strip():
+                            logger.info(f"[{exec_id}]    {line}")
 
         return final_result or "\n".join(output_parts)
 

@@ -30,8 +30,6 @@ from .execution_grid.sqs_client import (
 from .execution_grid.public_api import AgentExecution, ExecutionStatus, utc_now
 from .execution_grid.agent_runner import AgentRunner
 from .execution_grid.repo_manager import get_repo_manager
-from .execution_grid.event_bus import event_bus
-from .coordinator.chat_logger import get_agent_event_logger
 
 # Configure logging
 logging.basicConfig(
@@ -74,12 +72,6 @@ class Worker:
             logger.error("Set AGENT_GRID_SQS_JOB_QUEUE_URL and AGENT_GRID_SQS_RESULT_QUEUE_URL")
             return
 
-        # Start event bus and chat logger for real-time agent output
-        await event_bus.start()
-        chat_logger = get_agent_event_logger()
-        await chat_logger.start()
-        logger.info("Agent chat logging enabled - streaming agent output to logs")
-
         self._running = True
 
         while self._running:
@@ -100,11 +92,6 @@ class Worker:
         # If we have a job in progress, let it finish
         if self._current_job:
             logger.info(f"Waiting for current job {self._current_job.execution_id} to complete...")
-
-        # Stop chat logger and event bus
-        chat_logger = get_agent_event_logger()
-        await chat_logger.stop()
-        await event_bus.stop()
 
     async def _poll_and_execute(self) -> None:
         """Poll for a job and execute it."""
