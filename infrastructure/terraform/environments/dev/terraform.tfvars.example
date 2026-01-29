@@ -10,3 +10,4 @@ database_password = "CHANGE_ME_TO_A_STRONG_PASSWORD"
 # Optional: GitHub integration
 # github_token          = "ghp_xxxx"
 # github_webhook_secret = "your-webhook-secret"
+# github_org            = "my-org"  # org-level webhook for all repos

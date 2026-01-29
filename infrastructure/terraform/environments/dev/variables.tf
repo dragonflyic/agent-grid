@@ -29,3 +29,9 @@ variable "github_webhook_secret" {
   sensitive   = true
   default     = ""
 }
+
+variable "github_org" {
+  description = "GitHub organization name for org-level webhook"
+  type        = string
+  default     = ""
+}
