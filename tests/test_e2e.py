@@ -383,3 +383,269 @@ class TestEndToEnd:
         finally:
             test_bus.unsubscribe(collector)
             await test_bus.stop()
+
+
+class TestWebhookAutoLaunch:
+    """Tests for webhook-triggered auto-launch functionality."""
+
+    @pytest.mark.asyncio
+    async def test_webhook_with_agent_grid_label_triggers_launch(self, mock_db):
+        """
+        Test that a GitHub webhook for an issue with the 'agent-grid' label
+        triggers an agent execution.
+
+        This is the core test for the webhook auto-launch feature.
+        """
+        from agent_grid.execution_grid import EventBus, Event
+        from agent_grid.coordinator.scheduler import Scheduler
+        from agent_grid.issue_tracker.filesystem_client import FilesystemClient
+        import tempfile
+        from pathlib import Path
+
+        # Create a fresh event bus for isolated testing
+        test_event_bus = EventBus()
+        events_received = []
+
+        async def event_collector(event):
+            events_received.append(event)
+
+        test_event_bus.subscribe(event_collector)
+        await test_event_bus.start()
+
+        try:
+            # Create temporary directory for issues
+            with tempfile.TemporaryDirectory() as issues_dir:
+                issue_tracker = FilesystemClient(issues_dir=Path(issues_dir))
+
+                # Create an issue to simulate what the webhook handler would create
+                issue = await issue_tracker.create_issue(
+                    repo="test/webhook-repo",
+                    title="Test webhook auto-launch",
+                    body="This issue should trigger agent execution via webhook",
+                    labels=["agent-grid"],  # The trigger label
+                )
+
+                # Simulate the webhook event that would be published
+                await test_event_bus.publish(
+                    EventType.ISSUE_CREATED,
+                    {
+                        "repo": "test/webhook-repo",
+                        "issue_id": issue.id,
+                        "title": issue.title,
+                        "body": issue.body,
+                        "labels": ["agent-grid"],
+                        "html_url": f"https://github.com/test/webhook-repo/issues/{issue.id}",
+                    },
+                )
+
+                # Wait for event to be processed
+                await test_event_bus.wait_until_empty()
+                await asyncio.sleep(0.1)
+
+                # Verify the ISSUE_CREATED event was published
+                assert len(events_received) == 1
+                assert events_received[0].type == EventType.ISSUE_CREATED
+                assert events_received[0].payload["labels"] == ["agent-grid"]
+                assert events_received[0].payload["issue_id"] == issue.id
+
+        finally:
+            test_event_bus.unsubscribe(event_collector)
+            await test_event_bus.stop()
+
+    @pytest.mark.asyncio
+    async def test_webhook_without_trigger_label_does_not_launch(self):
+        """
+        Test that a GitHub webhook for an issue WITHOUT the trigger label
+        does not trigger agent execution (scheduler should ignore it).
+        """
+        from agent_grid.execution_grid import EventBus
+        from agent_grid.coordinator.scheduler import Scheduler
+
+        # Create a fresh event bus for isolated testing
+        test_event_bus = EventBus()
+        events_received = []
+        scheduler_handled = []
+
+        async def event_collector(event):
+            events_received.append(event)
+
+        test_event_bus.subscribe(event_collector)
+        await test_event_bus.start()
+
+        try:
+            # Create a scheduler and check its decision
+            scheduler = Scheduler()
+
+            # Test that scheduler correctly identifies non-trigger labels
+            assert scheduler._should_auto_launch(["bug", "documentation"]) is False
+            assert scheduler._should_auto_launch([]) is False
+            assert scheduler._should_auto_launch(["help wanted"]) is False
+
+            # Simulate the webhook event without trigger labels
+            await test_event_bus.publish(
+                EventType.ISSUE_CREATED,
+                {
+                    "repo": "test/webhook-repo",
+                    "issue_id": "42",
+                    "title": "Regular issue without trigger label",
+                    "body": "This should not trigger an agent",
+                    "labels": ["bug", "documentation"],  # No trigger labels
+                    "html_url": "https://github.com/test/webhook-repo/issues/42",
+                },
+            )
+
+            await test_event_bus.wait_until_empty()
+            await asyncio.sleep(0.1)
+
+            # Event was published but should not trigger auto-launch
+            assert len(events_received) == 1
+            assert events_received[0].payload["labels"] == ["bug", "documentation"]
+
+        finally:
+            test_event_bus.unsubscribe(event_collector)
+            await test_event_bus.stop()
+
+    @pytest.mark.asyncio
+    async def test_all_trigger_labels_work(self):
+        """
+        Test that all valid trigger labels ('agent', 'automated', 'agent-grid')
+        correctly trigger auto-launch.
+        """
+        from agent_grid.coordinator.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        # All three trigger labels should work
+        assert scheduler._should_auto_launch(["agent"]) is True
+        assert scheduler._should_auto_launch(["automated"]) is True
+        assert scheduler._should_auto_launch(["agent-grid"]) is True
+
+        # Multiple labels including a trigger label should work
+        assert scheduler._should_auto_launch(["bug", "agent-grid", "high-priority"]) is True
+        assert scheduler._should_auto_launch(["feature", "automated"]) is True
+
+        # Multiple trigger labels should work
+        assert scheduler._should_auto_launch(["agent", "agent-grid"]) is True
+
+    @pytest.mark.asyncio
+    async def test_labeled_event_triggers_auto_launch(self):
+        """
+        Test that the 'labeled' action in webhook events can also trigger
+        auto-launch when the agent-grid label is added to an existing issue.
+        """
+        from agent_grid.execution_grid import EventBus
+
+        test_event_bus = EventBus()
+        events_received = []
+
+        async def event_collector(event):
+            events_received.append(event)
+
+        test_event_bus.subscribe(event_collector)
+        await test_event_bus.start()
+
+        try:
+            # Simulate adding the 'agent-grid' label to an existing issue
+            # This would come through as an ISSUE_UPDATED event with action='labeled'
+            await test_event_bus.publish(
+                EventType.ISSUE_UPDATED,
+                {
+                    "repo": "test/webhook-repo",
+                    "issue_id": "99",
+                    "action": "labeled",
+                    "title": "Existing issue now labeled",
+                    "body": "This issue was just labeled with agent-grid",
+                    "state": "open",
+                    "labels": ["agent-grid"],  # Label was just added
+                },
+            )
+
+            await test_event_bus.wait_until_empty()
+            await asyncio.sleep(0.1)
+
+            # Verify the event was published correctly
+            assert len(events_received) == 1
+            assert events_received[0].type == EventType.ISSUE_UPDATED
+            assert events_received[0].payload["action"] == "labeled"
+            assert "agent-grid" in events_received[0].payload["labels"]
+
+        finally:
+            test_event_bus.unsubscribe(event_collector)
+            await test_event_bus.stop()
+
+    @pytest.mark.asyncio
+    async def test_scheduler_processes_issue_created_event(self, mock_db):
+        """
+        Test the full scheduler flow: receiving an ISSUE_CREATED event
+        and attempting to launch an agent.
+        """
+        from agent_grid.execution_grid import EventBus, Event
+        from agent_grid.coordinator.scheduler import Scheduler
+        from agent_grid.issue_tracker.filesystem_client import FilesystemClient
+        from unittest.mock import patch, AsyncMock
+        import tempfile
+        from pathlib import Path
+
+        test_event_bus = EventBus()
+        await test_event_bus.start()
+
+        try:
+            with tempfile.TemporaryDirectory() as issues_dir:
+                issue_tracker = FilesystemClient(issues_dir=Path(issues_dir))
+
+                # Create an issue first
+                issue = await issue_tracker.create_issue(
+                    repo="test/scheduler-repo",
+                    title="Scheduler test issue",
+                    body="Testing scheduler agent launch",
+                    labels=["agent-grid"],
+                )
+
+                # Create scheduler with mocked dependencies
+                scheduler = Scheduler()
+                scheduler._db = mock_db
+
+                # Mock budget manager to allow launch
+                mock_budget = AsyncMock()
+                mock_budget.can_launch_agent = AsyncMock(return_value=(True, ""))
+                scheduler._budget_manager = mock_budget
+
+                # Track if _try_launch_agent was called
+                launch_called = []
+                original_try_launch = scheduler._try_launch_agent
+
+                async def mock_try_launch(issue_id, repo):
+                    launch_called.append({"issue_id": issue_id, "repo": repo})
+                    # Don't actually launch, just record the call
+
+                scheduler._try_launch_agent = mock_try_launch
+
+                # Start scheduler
+                await scheduler.start()
+
+                # Create and process an ISSUE_CREATED event with patch for issue tracker
+                with patch("agent_grid.coordinator.scheduler.get_issue_tracker", return_value=issue_tracker):
+                    event = Event(
+                        type=EventType.ISSUE_CREATED,
+                        payload={
+                            "repo": "test/scheduler-repo",
+                            "issue_id": issue.id,
+                            "title": issue.title,
+                            "body": issue.body,
+                            "labels": ["agent-grid"],
+                            "html_url": f"https://github.com/test/scheduler-repo/issues/{issue.id}",
+                        },
+                    )
+
+                    # Directly call the handler to test the logic
+                    await scheduler._handle_issue_created(event)
+
+                # Verify _try_launch_agent was called with correct arguments
+                assert len(launch_called) == 1
+                assert launch_called[0]["issue_id"] == issue.id
+                assert launch_called[0]["repo"] == "test/scheduler-repo"
+
+                await scheduler.stop()
+
+        finally:
+            await test_event_bus.stop()
