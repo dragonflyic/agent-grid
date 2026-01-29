@@ -33,3 +33,13 @@ output "database_endpoint" {
   description = "RDS database endpoint"
   value       = module.database.endpoint
 }
+
+output "github_webhook_url" {
+  description = "GitHub webhook URL (for manual setup if needed)"
+  value       = "https://${module.apprunner.service_url}/webhooks/github"
+}
+
+output "github_org" {
+  description = "GitHub organization with webhook configured"
+  value       = var.github_org
+}

@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
   }
 
   # For MVP, use local state. Configure S3 backend for production:
@@ -26,6 +30,11 @@ provider "aws" {
       ManagedBy   = "terraform"
     }
   }
+}
+
+provider "github" {
+  token = var.github_token
+  owner = var.github_org
 }
 
 # Data sources for existing VPC (use default VPC for MVP)
@@ -173,4 +182,19 @@ locals {
     Project     = var.project_name
     Environment = "dev"
   }
+}
+
+# GitHub Organization Webhook
+resource "github_organization_webhook" "agent_grid" {
+  count = var.github_org != "" ? 1 : 0
+
+  configuration {
+    url          = "https://${module.apprunner.service_url}/webhooks/github"
+    content_type = "json"
+    secret       = var.github_webhook_secret
+    insecure_ssl = false
+  }
+
+  events = ["issues", "issue_comment"]
+  active = true
 }
