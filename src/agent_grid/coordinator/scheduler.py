@@ -169,7 +169,7 @@ class Scheduler:
             return None
 
         # Generate prompt
-        prompt = self._generate_prompt(issue.title, issue.body or "")
+        prompt = self._generate_prompt(issue.title, issue.body or "", issue_id)
 
         # Launch agent
         repo_url = f"https://github.com/{repo}.git"
@@ -211,7 +211,7 @@ class Scheduler:
         trigger_labels = {"agent", "automated", "agent-grid"}
         return bool(set(labels) & trigger_labels)
 
-    def _generate_prompt(self, title: str, body: str) -> str:
+    def _generate_prompt(self, title: str, body: str, issue_id: str) -> str:
         """Generate the prompt for the agent."""
         return f"""You are working on the following issue:
 
@@ -222,6 +222,8 @@ class Scheduler:
 Please analyze this issue and implement the necessary changes. When you're done:
 1. Commit your changes with a clear commit message
 2. Create a pull request for your branch targeting the main branch
+   - In the PR description, reference the initiating issue by including "Closes #{issue_id}" or "Fixes #{issue_id}"
+   - After creating the PR, link it to the issue by running: `gh pr edit --add-issue #{issue_id}`
 3. If you need help from another agent on a related issue, use the nudge endpoint
 
 Work carefully and test your changes before committing."""
