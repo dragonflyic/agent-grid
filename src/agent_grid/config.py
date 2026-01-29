@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # coordinator: Publishes jobs to SQS, listens for results (cloud)
     # worker: Polls SQS for jobs, runs agents locally (desktop)
 
+    # Webhook deduplication settings
+    webhook_dedup_quiet_period_seconds: int = 5  # Wait time before processing (allows related events to arrive)
+    webhook_dedup_poll_interval_seconds: int = 2  # How often to check for events to process
+
     model_config = {"env_prefix": "AGENT_GRID_", "env_file": ".env", "extra": "ignore"}
 
 

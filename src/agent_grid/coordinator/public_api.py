@@ -39,6 +39,22 @@ class NudgeRequest(BaseModel):
     processed_at: datetime | None = None
 
 
+class WebhookEvent(BaseModel):
+    """A GitHub webhook event stored for deduplication processing."""
+
+    id: UUID
+    delivery_id: str  # X-GitHub-Delivery header (idempotency key)
+    event_type: str  # issues, issue_comment, etc.
+    action: str | None = None  # opened, labeled, created, etc.
+    repo: str | None = None
+    issue_id: str | None = None
+    payload: str | None = None  # JSON payload for processing
+    processed: bool = False
+    coalesced_into: UUID | None = None  # Reference to primary event if deduplicated
+    received_at: datetime = Field(default_factory=utc_now)
+    processed_at: datetime | None = None
+
+
 class NudgeRequestCreate(BaseModel):
     """Request to create a nudge."""
 

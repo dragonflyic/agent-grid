@@ -6,7 +6,7 @@ from uuid import UUID
 import asyncpg
 
 from ..execution_grid import AgentExecution, ExecutionStatus
-from .public_api import NudgeRequest, utc_now
+from .public_api import NudgeRequest, WebhookEvent, utc_now
 from ..config import settings
 
 
@@ -250,6 +250,151 @@ class Database:
             "tokens_used": row["tokens"] if row else 0,
             "duration_seconds": row["duration"] if row else 0,
         }
+
+    # Webhook event operations
+
+    async def create_webhook_event(self, event: WebhookEvent) -> bool:
+        """
+        Insert a new webhook event.
+
+        Returns True if inserted, False if duplicate delivery_id (idempotent).
+        """
+        pool = await self._get_pool()
+        try:
+            await pool.execute(
+                """
+                INSERT INTO webhook_events (id, delivery_id, event_type, action, repo, issue_id, payload, processed, coalesced_into, received_at, processed_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                """,
+                event.id,
+                event.delivery_id,
+                event.event_type,
+                event.action,
+                event.repo,
+                event.issue_id,
+                event.payload,
+                event.processed,
+                event.coalesced_into,
+                event.received_at,
+                event.processed_at,
+            )
+            return True
+        except asyncpg.UniqueViolationError:
+            # Duplicate delivery_id - idempotent handling
+            return False
+
+    async def get_webhook_event_by_delivery_id(self, delivery_id: str) -> WebhookEvent | None:
+        """Get a webhook event by its GitHub delivery ID."""
+        pool = await self._get_pool()
+        row = await pool.fetchrow(
+            "SELECT * FROM webhook_events WHERE delivery_id = $1",
+            delivery_id,
+        )
+        if row:
+            return self._row_to_webhook_event(row)
+        return None
+
+    async def get_unprocessed_webhook_events(
+        self,
+        older_than: datetime,
+        limit: int = 100,
+    ) -> list[WebhookEvent]:
+        """
+        Get unprocessed webhook events older than a given time.
+
+        This allows for a "quiet period" before processing to collect related events.
+        """
+        pool = await self._get_pool()
+        rows = await pool.fetch(
+            """
+            SELECT * FROM webhook_events
+            WHERE processed = FALSE
+            AND received_at < $1
+            ORDER BY received_at ASC
+            LIMIT $2
+            """,
+            older_than,
+            limit,
+        )
+        return [self._row_to_webhook_event(row) for row in rows]
+
+    async def get_recent_events_for_issue(
+        self,
+        repo: str,
+        issue_id: str,
+        since: datetime,
+    ) -> list[WebhookEvent]:
+        """
+        Get all webhook events for a specific issue since a given time.
+
+        Used for coalescing multiple events for the same issue.
+        """
+        pool = await self._get_pool()
+        rows = await pool.fetch(
+            """
+            SELECT * FROM webhook_events
+            WHERE repo = $1 AND issue_id = $2 AND received_at >= $3
+            ORDER BY received_at ASC
+            """,
+            repo,
+            issue_id,
+            since,
+        )
+        return [self._row_to_webhook_event(row) for row in rows]
+
+    async def mark_webhook_event_processed(
+        self,
+        event_id: UUID,
+        coalesced_into: UUID | None = None,
+    ) -> None:
+        """Mark a webhook event as processed."""
+        pool = await self._get_pool()
+        await pool.execute(
+            """
+            UPDATE webhook_events
+            SET processed = TRUE, processed_at = $2, coalesced_into = $3
+            WHERE id = $1
+            """,
+            event_id,
+            utc_now(),
+            coalesced_into,
+        )
+
+    async def mark_webhook_events_processed(
+        self,
+        event_ids: list[UUID],
+        coalesced_into: UUID | None = None,
+    ) -> None:
+        """Mark multiple webhook events as processed (batch operation)."""
+        if not event_ids:
+            return
+        pool = await self._get_pool()
+        await pool.execute(
+            """
+            UPDATE webhook_events
+            SET processed = TRUE, processed_at = $2, coalesced_into = $3
+            WHERE id = ANY($1)
+            """,
+            event_ids,
+            utc_now(),
+            coalesced_into,
+        )
+
+    def _row_to_webhook_event(self, row: asyncpg.Record) -> WebhookEvent:
+        """Convert a database row to a WebhookEvent."""
+        return WebhookEvent(
+            id=row["id"],
+            delivery_id=row["delivery_id"],
+            event_type=row["event_type"],
+            action=row["action"],
+            repo=row["repo"],
+            issue_id=row["issue_id"],
+            payload=row["payload"],
+            processed=row["processed"],
+            coalesced_into=row["coalesced_into"],
+            received_at=row["received_at"],
+            processed_at=row["processed_at"],
+        )
 
 
 # Global instance

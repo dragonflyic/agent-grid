@@ -25,6 +25,7 @@ from .coordinator import (
     get_management_loop,
     get_scheduler,
     get_agent_event_logger,
+    get_webhook_processor,
 )
 from .issue_tracker import webhook_router, issues_router, get_issue_tracker
 
@@ -80,11 +81,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     agent_logger = get_agent_event_logger()
     await agent_logger.start()
 
+    # Start webhook processor for deduplication
+    webhook_processor = get_webhook_processor()
+    await webhook_processor.start()
+    logger.info("Webhook processor started")
+
     logger.info("Agent Grid startup complete")
     yield
 
     # Shutdown
     logger.info("Shutting down Agent Grid...")
+    await webhook_processor.stop()
     await agent_logger.stop()
     await management_loop.stop()
     await scheduler.stop()
