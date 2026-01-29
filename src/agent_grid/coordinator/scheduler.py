@@ -221,7 +221,8 @@ class Scheduler:
 
 Please analyze this issue and implement the necessary changes. When you're done:
 1. Commit your changes with a clear commit message
-2. If you need help from another agent on a related issue, use the nudge endpoint
+2. Create a pull request for your branch targeting the main branch
+3. If you need help from another agent on a related issue, use the nudge endpoint
 
 Work carefully and test your changes before committing."""
 
