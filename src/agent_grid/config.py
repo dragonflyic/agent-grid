@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # coordinator: Publishes jobs to SQS, listens for results (cloud)
     # worker: Polls SQS for jobs, runs agents locally (desktop)
 
-    model_config = {"env_prefix": "AGENT_GRID_"}
+    model_config = {"env_prefix": "AGENT_GRID_", "env_file": ".env", "extra": "ignore"}
 
 
 settings = Settings()
