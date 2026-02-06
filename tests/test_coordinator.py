@@ -78,7 +78,8 @@ class TestScheduler:
         from agent_grid.coordinator.scheduler import Scheduler
 
         scheduler = Scheduler()
-        prompt = scheduler._generate_prompt("Fix bug", "The app crashes on startup", "42")
+        prompt = scheduler._generate_prompt("Fix bug", "The app crashes on startup", "42", "owner/repo")
         assert "Fix bug" in prompt
         assert "crashes on startup" in prompt
         assert "#42" in prompt
+        assert "agent/42" in prompt  # Branch name should be included

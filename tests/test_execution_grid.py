@@ -48,7 +48,6 @@ class TestExecutionEventPublisher:
         # This should not raise
         await publisher.agent_started(
             execution_id=uuid4(),
-            issue_id="123",
             repo_url="https://github.com/test/repo.git",
         )
 

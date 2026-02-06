@@ -65,57 +65,6 @@ class RepoManager:
 
         return work_dir
 
-    async def create_branch(
-        self,
-        execution_id: UUID,
-        branch_name: str,
-    ) -> None:
-        """
-        Create and checkout a new branch for the agent's work.
-
-        Args:
-            execution_id: Execution ID.
-            branch_name: Name of the branch to create.
-        """
-        work_dir = self.get_execution_path(execution_id)
-
-        # Create and checkout branch
-        process = await asyncio.create_subprocess_exec(
-            "git", "checkout", "-b", branch_name,
-            cwd=work_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            raise RuntimeError(f"Failed to create branch: {stderr.decode()}")
-
-    async def push_branch(
-        self,
-        execution_id: UUID,
-        branch_name: str,
-    ) -> None:
-        """
-        Push the agent's branch to the remote.
-
-        Args:
-            execution_id: Execution ID.
-            branch_name: Name of the branch to push.
-        """
-        work_dir = self.get_execution_path(execution_id)
-
-        process = await asyncio.create_subprocess_exec(
-            "git", "push", "-u", "origin", branch_name,
-            cwd=work_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            raise RuntimeError(f"Failed to push branch: {stderr.decode()}")
-
     async def cleanup(self, execution_id: UUID) -> None:
         """
         Clean up the working directory for an execution.

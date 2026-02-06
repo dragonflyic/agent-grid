@@ -12,7 +12,6 @@ class ExecutionEventPublisher:
     async def agent_started(
         self,
         execution_id: UUID,
-        issue_id: str,
         repo_url: str,
     ) -> None:
         """Publish agent started event."""
@@ -20,7 +19,6 @@ class ExecutionEventPublisher:
             EventType.AGENT_STARTED,
             {
                 "execution_id": str(execution_id),
-                "issue_id": issue_id,
                 "repo_url": repo_url,
             },
         )

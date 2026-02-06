@@ -176,32 +176,25 @@ class TestEndToEnd:
 
             repo_manager.clone_repo = mock_clone
 
-            # Patch create_branch to be a no-op
-            async def mock_create_branch(execution_id, branch_name):
-                pass
-
-            repo_manager.create_branch = mock_create_branch
-
-            # Patch the push to be a no-op
-            async def mock_push(execution_id, branch_name):
-                pass
-
-            repo_manager.push_branch = mock_push
-
-            # Create execution
-            from agent_grid.execution_grid import AgentExecution
+            # Create execution config and record
+            from agent_grid.execution_grid import AgentExecution, ExecutionConfig
+            prompt = f"Issue: {issue.title}\n\n{issue.body}"
+            config = ExecutionConfig(
+                repo_url="file:///tmp/test-repo",
+                prompt=prompt,
+                permission_mode="bypassPermissions",
+            )
             execution = AgentExecution(
                 id=uuid4(),
-                issue_id=issue.id,
                 repo_url="file:///tmp/test-repo",
                 status=ExecutionStatus.PENDING,
-                prompt=f"Issue: {issue.title}\n\n{issue.body}",
+                prompt=prompt,
             )
 
             # Run with mocked SDK and patched event bus
             with patch("agent_grid.execution_grid.agent_runner.query", mock_query), \
                  patch("agent_grid.execution_grid.event_publisher.event_bus", test_event_bus):
-                result = await agent_runner.run(execution, execution.prompt)
+                result = await agent_runner.run(execution, config)
 
             # Step 4: Verify results
             if result.status == ExecutionStatus.FAILED:

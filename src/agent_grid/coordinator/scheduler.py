@@ -3,12 +3,14 @@
 import logging
 from uuid import UUID
 
+from ..config import settings
 from ..execution_grid import (
     event_bus,
     get_execution_grid,
     AgentExecution,
     Event,
     EventType,
+    ExecutionConfig,
     ExecutionStatus,
 )
 
@@ -17,6 +19,83 @@ from ..issue_tracker import get_issue_tracker
 from .budget_manager import get_budget_manager
 from .database import get_database
 from .nudge_handler import get_nudge_handler
+
+
+# Planning mode instructions - appended to prompt when test_force_planning_only is enabled
+PLANNING_ONLY_HEADER = """
+
+---
+
+**TESTING OVERRIDE - PLANNING ONLY MODE**
+
+CRITICAL: You are running in PLANNING ONLY mode for testing. You must:
+
+1. DO NOT write ANY code
+2. DO NOT create or edit any files in the repository
+3. DO NOT make any commits
+4. Your ONLY task is to create subissues
+
+Break down the issue into 2-5 smaller, independently implementable subissues.
+Include the "agent" label so subissues are automatically picked up.
+
+Remember: DO NOT write code. DO NOT edit files. ONLY create subissues.
+"""
+
+PLANNING_GITHUB_INSTRUCTIONS = """
+## How to Create Subissues (GitHub)
+
+Use the `gh` CLI to create issues and add them as sub-issues:
+
+```bash
+# 1. Create the issue and capture its URL
+ISSUE_URL=$(gh issue create --repo {repo} \\
+  --title "Subissue title" \\
+  --body "Description with acceptance criteria" \\
+  --label "agent" 2>&1 | tail -1)
+
+# 2. Extract the issue number from the URL
+ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')
+
+# 3. Get the issue's internal ID (required by sub-issues API)
+ISSUE_ID=$(gh api repos/{repo}/issues/$ISSUE_NUM --jq '.id')
+
+# 4. Add it as a sub-issue to the parent
+gh api -X POST repos/{repo}/issues/{issue_id}/sub_issues -f sub_issue_id="$ISSUE_ID"
+```
+
+Or as a one-liner for each subissue:
+```bash
+ISSUE_NUM=$(gh issue create --repo {repo} --title "Title" --body "Body" --label "agent" 2>&1 | grep -oE '[0-9]+$') && \\
+ISSUE_ID=$(gh api repos/{repo}/issues/$ISSUE_NUM --jq '.id') && \\
+gh api -X POST repos/{repo}/issues/{issue_id}/sub_issues --input - <<< "{{\\"sub_issue_id\\": $ISSUE_ID}}"
+```
+"""
+
+PLANNING_FILESYSTEM_INSTRUCTIONS = """
+## How to Create Subissues (Local Testing)
+
+Use curl to create subissues via the Agent Grid API:
+
+```bash
+curl -X POST "http://localhost:8000/api/issues/{repo}/{issue_id}/subissues" \\
+  -H "Content-Type: application/json" \\
+  -d '{{
+    "title": "Subissue title here",
+    "body": "Description with acceptance criteria",
+    "labels": ["agent"]
+  }}'
+```
+"""
+
+
+def get_planning_override(repo: str, issue_id: str) -> str:
+    """Get the planning-only override prompt based on issue tracker type."""
+    if settings.issue_tracker_type == "github":
+        instructions = PLANNING_GITHUB_INSTRUCTIONS.format(repo=repo, issue_id=issue_id)
+    else:
+        instructions = PLANNING_FILESYSTEM_INSTRUCTIONS.format(repo=repo, issue_id=issue_id)
+
+    return PLANNING_ONLY_HEADER + instructions
 
 
 class Scheduler:
@@ -168,24 +247,35 @@ class Scheduler:
             logger.error(f"Failed to get issue {issue_id} from {repo}: {e}")
             return None
 
-        # Generate prompt
-        prompt = self._generate_prompt(issue.title, issue.body or "", issue_id)
+        # Generate prompt with all instructions
+        prompt = self._generate_prompt(issue.title, issue.body or "", issue_id, repo)
+
+        # Apply testing override if configured
+        if settings.test_force_planning_only:
+            prompt = prompt + get_planning_override(repo, issue_id)
+
+        # Build execution config
+        repo_url = f"https://github.com/{repo}.git"
+        permission_mode = "bypassPermissions" if settings.agent_bypass_permissions else "acceptEdits"
+        config = ExecutionConfig(
+            repo_url=repo_url,
+            prompt=prompt,
+            permission_mode=permission_mode,
+        )
 
         # Launch agent
-        repo_url = f"https://github.com/{repo}.git"
         grid = get_execution_grid()
-        execution_id = await grid.launch_agent(issue_id, repo_url, prompt)
+        execution_id = await grid.launch_agent(config)
         logger.info(f"Launched agent {execution_id} for issue {issue_id}")
 
-        # Record in database
+        # Record in database (coordinator tracks issue_id mapping internally)
         execution = AgentExecution(
             id=execution_id,
-            issue_id=issue_id,
             repo_url=repo_url,
             status=ExecutionStatus.PENDING,
             prompt=prompt,
         )
-        await self._db.create_execution(execution)
+        await self._db.create_execution(execution, issue_id=issue_id)
 
         return execution_id
 
@@ -211,20 +301,34 @@ class Scheduler:
         trigger_labels = {"agent", "automated", "agent-grid"}
         return bool(set(labels) & trigger_labels)
 
-    def _generate_prompt(self, title: str, body: str, issue_id: str) -> str:
+    def _generate_prompt(self, title: str, body: str, issue_id: str, repo: str) -> str:
         """Generate the prompt for the agent."""
+        branch_name = f"agent/{issue_id}"
         return f"""You are working on the following issue:
 
 ## {title}
 
 {body}
 
+## Setup
+
+First, create and checkout a working branch:
+```bash
+git checkout -b {branch_name}
+```
+
+## Instructions
+
 Please analyze this issue and implement the necessary changes. When you're done:
 1. Commit your changes with a clear commit message
-2. Create a pull request for your branch targeting the main branch
+2. Push your branch to the remote:
+   ```bash
+   git push -u origin {branch_name}
+   ```
+3. Create a pull request for your branch targeting the main branch
    - In the PR description, reference the initiating issue by including "Closes #{issue_id}" or "Fixes #{issue_id}"
    - After creating the PR, link it to the issue by running: `gh pr edit --add-issue #{issue_id}`
-3. If you need help from another agent on a related issue, use the nudge endpoint
+4. If you need help from another agent on a related issue, use the nudge endpoint
 
 Work carefully and test your changes before committing."""
 

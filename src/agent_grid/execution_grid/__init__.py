@@ -5,6 +5,7 @@ from .public_api import (
     AgentExecution,
     Event,
     EventType,
+    ExecutionConfig,
     ExecutionStatus,
     utc_now,
     # Type aliases
@@ -22,6 +23,7 @@ __all__ = [
     "AgentExecution",
     "Event",
     "EventType",
+    "ExecutionConfig",
     "ExecutionStatus",
     "utc_now",
     # Public API - Type aliases
