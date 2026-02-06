@@ -14,6 +14,7 @@ from .public_api import (
     AgentEventHandler,
     Event,
     EventType,
+    ExecutionConfig,
     ExecutionGrid,
     ExecutionStatus,
     utc_now,
@@ -139,14 +140,9 @@ class ExecutionGridClient(ExecutionGrid):
         # Remove from active tracking
         self._executions.pop(execution_id, None)
 
-    async def launch_agent(
-        self,
-        issue_id: str,
-        repo_url: str,
-        prompt: str,
-    ) -> UUID:
+    async def launch_agent(self, config: ExecutionConfig) -> UUID:
         """
-        Launch a coding agent for an issue.
+        Launch a generic Claude Code session.
 
         In SQS mode, this publishes a job request to the queue.
         The actual execution happens on the local worker.
@@ -156,33 +152,31 @@ class ExecutionGridClient(ExecutionGrid):
         # Create local tracking record
         execution = AgentExecution(
             id=execution_id,
-            issue_id=issue_id,
-            repo_url=repo_url,
+            repo_url=config.repo_url,
             status=ExecutionStatus.PENDING,
-            prompt=prompt,
+            prompt=config.prompt,
         )
         self._executions[execution_id] = execution
 
         # Publish job request to SQS
         job_request = JobRequest(
             execution_id=str(execution_id),
-            issue_id=issue_id,
-            repo_url=repo_url,
-            prompt=prompt,
+            repo_url=config.repo_url,
+            prompt=config.prompt,
+            permission_mode=config.permission_mode,
             created_at=utc_now(),
         )
 
         try:
             await self._sqs.publish_job_request(job_request)
-            logger.info(f"Published job request {execution_id} for issue {issue_id}")
+            logger.info(f"Published job request {execution_id}")
 
             # Publish started event (optimistic - worker may not pick it up immediately)
             await event_bus.publish(
                 EventType.AGENT_STARTED,
                 {
                     "execution_id": str(execution_id),
-                    "issue_id": issue_id,
-                    "repo_url": repo_url,
+                    "repo_url": config.repo_url,
                 },
             )
 

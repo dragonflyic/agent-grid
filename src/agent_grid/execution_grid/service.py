@@ -7,6 +7,7 @@ from .public_api import (
     AgentExecution,
     AgentEventHandler,
     Event,
+    ExecutionConfig,
     ExecutionGrid,
 )
 from .event_bus import event_bus
@@ -29,21 +30,15 @@ class ExecutionGridService(ExecutionGrid):
         # Map handler IDs to internal event handlers for cleanup
         self._handler_mapping: dict[int, Callable[[Event], Awaitable[None]]] = {}
 
-    async def launch_agent(
-        self,
-        issue_id: str,
-        repo_url: str,
-        prompt: str,
-    ) -> UUID:
-        """Launch a coding agent for an issue."""
+    async def launch_agent(self, config: ExecutionConfig) -> UUID:
+        """Launch a generic Claude Code session."""
         execution_id = uuid4()
         execution = AgentExecution(
             id=execution_id,
-            issue_id=issue_id,
-            repo_url=repo_url,
-            prompt=prompt,
+            repo_url=config.repo_url,
+            prompt=config.prompt,
         )
-        self._agent_runner.start_execution(execution, prompt)
+        self._agent_runner.start_execution(execution, config)
         return execution_id
 
     async def get_execution_status(self, execution_id: UUID) -> AgentExecution | None:

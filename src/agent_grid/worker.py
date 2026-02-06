@@ -27,7 +27,7 @@ from .execution_grid.sqs_client import (
     JobRequest,
     JobResult,
 )
-from .execution_grid.public_api import AgentExecution, ExecutionStatus, utc_now
+from .execution_grid.public_api import AgentExecution, ExecutionConfig, ExecutionStatus, utc_now
 from .execution_grid.agent_runner import AgentRunner
 from .execution_grid.repo_manager import get_repo_manager
 
@@ -110,7 +110,6 @@ class Worker:
         self._current_receipt = receipt_handle
 
         logger.info(f"Processing job: {job_request.execution_id}")
-        logger.info(f"  Issue: {job_request.issue_id}")
         logger.info(f"  Repo: {job_request.repo_url}")
 
         try:
@@ -155,25 +154,27 @@ class Worker:
         """
         execution_id = UUID(job_request.execution_id)
 
+        # Build execution config from job request
+        config = ExecutionConfig(
+            repo_url=job_request.repo_url,
+            prompt=job_request.prompt,
+            permission_mode=job_request.permission_mode,
+        )
+
         # Create execution record
         execution = AgentExecution(
             id=execution_id,
-            issue_id=job_request.issue_id,
             repo_url=job_request.repo_url,
             prompt=job_request.prompt,
         )
 
-        # Run the agent (this does the full clone -> execute -> push cycle)
-        result_execution = await self._agent_runner.run(execution, job_request.prompt)
-
-        # Extract branch name
-        branch_name = f"agent/{job_request.issue_id}"
+        # Run the agent (this does the full clone -> execute cycle)
+        result_execution = await self._agent_runner.run(execution, config)
 
         return JobResult(
             execution_id=job_request.execution_id,
             status="completed" if result_execution.status == ExecutionStatus.COMPLETED else "failed",
             result=result_execution.result,
-            branch=branch_name if result_execution.status == ExecutionStatus.COMPLETED else None,
             completed_at=utc_now(),
         )
 

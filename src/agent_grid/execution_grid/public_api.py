@@ -26,6 +26,14 @@ def utc_now() -> datetime:
 # Models
 # =============================================================================
 
+class ExecutionConfig(BaseModel):
+    """Configuration for a generic agent execution."""
+
+    repo_url: str  # URL of repository to clone
+    prompt: str  # Full instructions for the agent
+    permission_mode: str = "bypassPermissions"  # ClaudeCodeOptions.permission_mode
+
+
 class ExecutionStatus(str, Enum):
     """Status of an agent execution."""
 
@@ -60,7 +68,6 @@ class AgentExecution(BaseModel):
     """Represents an agent execution."""
 
     id: UUID
-    issue_id: str
     repo_url: str
     status: ExecutionStatus = ExecutionStatus.PENDING
     prompt: str | None = None
@@ -86,19 +93,12 @@ class ExecutionGrid(ABC):
     """Abstract interface for the execution grid service."""
 
     @abstractmethod
-    async def launch_agent(
-        self,
-        issue_id: str,
-        repo_url: str,
-        prompt: str,
-    ) -> UUID:
+    async def launch_agent(self, config: ExecutionConfig) -> UUID:
         """
-        Launch a coding agent for an issue.
+        Launch a generic Claude Code session.
 
         Args:
-            issue_id: The issue ID this agent is working on.
-            repo_url: URL of the repository to clone.
-            prompt: Instructions for the agent.
+            config: Configuration for the execution (repo_url, prompt, permission_mode).
 
         Returns:
             Execution ID for tracking.

@@ -44,8 +44,13 @@ class Database:
 
     # Execution operations
 
-    async def create_execution(self, execution: AgentExecution) -> None:
-        """Insert a new execution record."""
+    async def create_execution(self, execution: AgentExecution, issue_id: str) -> None:
+        """Insert a new execution record.
+
+        Args:
+            execution: The execution record.
+            issue_id: The issue ID (coordinator's internal tracking).
+        """
         pool = await self._get_pool()
         await pool.execute(
             """
@@ -53,7 +58,7 @@ class Database:
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
             execution.id,
-            execution.issue_id,
+            issue_id,
             execution.repo_url,
             execution.status.value,
             execution.prompt,
@@ -145,7 +150,6 @@ class Database:
         """Convert a database row to an AgentExecution."""
         return AgentExecution(
             id=row["id"],
-            issue_id=row["issue_id"],
             repo_url=row["repo_url"],
             status=ExecutionStatus(row["status"]),
             prompt=row["prompt"],

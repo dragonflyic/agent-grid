@@ -20,9 +20,9 @@ class JobRequest(BaseModel):
     """Job request message sent to SQS."""
 
     execution_id: str
-    issue_id: str
     repo_url: str
     prompt: str
+    permission_mode: str = "bypassPermissions"
     created_at: datetime
 
 
@@ -90,10 +90,6 @@ class SQSClient:
                     "execution_id": {
                         "DataType": "String",
                         "StringValue": request.execution_id,
-                    },
-                    "issue_id": {
-                        "DataType": "String",
-                        "StringValue": request.issue_id,
                     },
                 },
             )
