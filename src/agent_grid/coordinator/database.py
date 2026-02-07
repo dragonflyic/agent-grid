@@ -1,5 +1,6 @@
 """PostgreSQL database access for coordinator."""
 
+import json
 from datetime import datetime
 from uuid import UUID
 
@@ -254,6 +255,145 @@ class Database:
             "tokens_used": row["tokens"] if row else 0,
             "duration_seconds": row["duration"] if row else 0,
         }
+
+    # Issue state operations
+
+    async def upsert_issue_state(
+        self,
+        issue_number: int,
+        repo: str,
+        classification: str | None = None,
+        parent_issue: int | None = None,
+        sub_issues: list[int] | None = None,
+        retry_count: int = 0,
+        metadata: dict | None = None,
+    ) -> None:
+        """Upsert an issue state record."""
+        pool = await self._get_pool()
+        await pool.execute(
+            """
+            INSERT INTO issue_state (issue_number, repo, classification, parent_issue, sub_issues, retry_count, metadata, last_checked_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+            ON CONFLICT (issue_number, repo) DO UPDATE SET
+                classification = COALESCE($3, issue_state.classification),
+                parent_issue = COALESCE($4, issue_state.parent_issue),
+                sub_issues = COALESCE($5, issue_state.sub_issues),
+                retry_count = $6,
+                metadata = COALESCE($7, issue_state.metadata),
+                last_checked_at = NOW(),
+                updated_at = NOW()
+            """,
+            issue_number, repo, classification, parent_issue, sub_issues, retry_count,
+            json.dumps(metadata) if metadata else None,
+        )
+
+    async def get_issue_state(self, issue_number: int, repo: str) -> dict | None:
+        """Get issue state by number and repo."""
+        pool = await self._get_pool()
+        row = await pool.fetchrow(
+            "SELECT * FROM issue_state WHERE issue_number = $1 AND repo = $2",
+            issue_number, repo,
+        )
+        return dict(row) if row else None
+
+    async def list_issue_states(self, repo: str, classification: str | None = None) -> list[dict]:
+        """List issue states with optional classification filter."""
+        pool = await self._get_pool()
+        if classification:
+            rows = await pool.fetch(
+                "SELECT * FROM issue_state WHERE repo = $1 AND classification = $2",
+                repo, classification,
+            )
+        else:
+            rows = await pool.fetch(
+                "SELECT * FROM issue_state WHERE repo = $1",
+                repo,
+            )
+        return [dict(row) for row in rows]
+
+    # Checkpoint operations
+
+    async def save_checkpoint(self, execution_id: UUID, checkpoint: dict) -> None:
+        """Save a checkpoint for an execution."""
+        pool = await self._get_pool()
+        await pool.execute(
+            "UPDATE executions SET checkpoint = $2 WHERE id = $1",
+            execution_id, json.dumps(checkpoint),
+        )
+
+    async def get_latest_checkpoint(self, issue_id: str) -> dict | None:
+        """Get the most recent checkpoint for an issue."""
+        pool = await self._get_pool()
+        row = await pool.fetchrow(
+            """
+            SELECT checkpoint FROM executions
+            WHERE issue_id = $1 AND checkpoint IS NOT NULL
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            issue_id,
+        )
+        if row and row["checkpoint"]:
+            return json.loads(row["checkpoint"]) if isinstance(row["checkpoint"], str) else row["checkpoint"]
+        return None
+
+    async def get_all_checkpoints(self, issue_id: str) -> list[dict]:
+        """Get all checkpoints for an issue, newest first."""
+        pool = await self._get_pool()
+        rows = await pool.fetch(
+            """
+            SELECT id, checkpoint, mode, status, created_at, completed_at
+            FROM executions
+            WHERE issue_id = $1 AND checkpoint IS NOT NULL
+            ORDER BY created_at DESC
+            """,
+            issue_id,
+        )
+        return [dict(row) for row in rows]
+
+    # Cron state operations
+
+    async def get_cron_state(self, key: str) -> dict | None:
+        """Get a cron state value."""
+        pool = await self._get_pool()
+        row = await pool.fetchrow("SELECT value FROM cron_state WHERE key = $1", key)
+        if row and row["value"]:
+            return json.loads(row["value"]) if isinstance(row["value"], str) else row["value"]
+        return None
+
+    async def set_cron_state(self, key: str, value: dict) -> None:
+        """Set a cron state value."""
+        pool = await self._get_pool()
+        await pool.execute(
+            """
+            INSERT INTO cron_state (key, value, updated_at) VALUES ($1, $2, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+            """,
+            key, json.dumps(value),
+        )
+
+    # Execution updates for new columns
+
+    async def update_execution_result(
+        self,
+        execution_id: UUID,
+        status: ExecutionStatus,
+        result: str | None = None,
+        pr_number: int | None = None,
+        branch: str | None = None,
+        checkpoint: dict | None = None,
+    ) -> None:
+        """Update execution with result details."""
+        pool = await self._get_pool()
+        await pool.execute(
+            """
+            UPDATE executions
+            SET status = $2, result = $3, pr_number = $4, branch = $5,
+                checkpoint = $6, completed_at = NOW()
+            WHERE id = $1
+            """,
+            execution_id, status.value, result, pr_number, branch,
+            json.dumps(checkpoint) if checkpoint else None,
+        )
 
 
 # Global instance
