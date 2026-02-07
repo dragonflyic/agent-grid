@@ -153,6 +153,33 @@ async def list_pending_nudges(limit: int = 10) -> list[NudgeRequest]:
     return await handler.get_pending_nudges(limit)
 
 
+class AgentStatusCallback(BaseModel):
+    """Callback payload from Fly Machine workers."""
+
+    execution_id: str
+    status: str  # "completed" or "failed"
+    result: str | None = None
+    branch: str | None = None
+    pr_number: int | None = None
+    checkpoint: dict | None = None
+
+
+@coordinator_router.post("/agent-status")
+async def agent_status_callback(body: AgentStatusCallback) -> dict[str, str]:
+    """Callback endpoint for Fly Machine workers to report results."""
+    from ..execution_grid.fly_grid import get_fly_execution_grid
+    grid = get_fly_execution_grid()
+    await grid.handle_agent_result(
+        execution_id=UUID(body.execution_id),
+        status=body.status,
+        result=body.result,
+        branch=body.branch,
+        pr_number=body.pr_number,
+        checkpoint=body.checkpoint,
+    )
+    return {"status": "ok"}
+
+
 @coordinator_router.get("/budget")
 async def get_budget_status() -> dict[str, Any]:
     """

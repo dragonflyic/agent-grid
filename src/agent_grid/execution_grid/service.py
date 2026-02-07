@@ -15,7 +15,7 @@ from .agent_runner import get_agent_runner
 from ..config import settings
 
 if TYPE_CHECKING:
-    from .sqs_grid import ExecutionGridClient
+    from .fly_grid import FlyExecutionGrid
 
 
 class ExecutionGridService(ExecutionGrid):
@@ -75,7 +75,7 @@ class ExecutionGridService(ExecutionGrid):
 
 # Global service instance
 _service: ExecutionGridService | None = None
-_sqs_grid: "ExecutionGridClient | None" = None
+_fly_grid: "FlyExecutionGrid | None" = None
 
 
 def get_execution_grid() -> ExecutionGrid:
@@ -84,17 +84,16 @@ def get_execution_grid() -> ExecutionGrid:
 
     Returns different implementations based on deployment_mode:
     - "local": In-memory service that runs agents directly
-    - "coordinator": SQS-based client that publishes jobs to queue
-    - "worker": Not used (worker has its own execution logic)
+    - "coordinator": Fly Machines-based client that spawns ephemeral workers
     """
-    global _service, _sqs_grid
+    global _service, _fly_grid
 
     if settings.deployment_mode == "coordinator":
-        # SQS-based implementation for cloud coordinator
-        if _sqs_grid is None:
-            from .sqs_grid import ExecutionGridClient
-            _sqs_grid = ExecutionGridClient()
-        return _sqs_grid
+        # Fly Machines-based implementation for cloud coordinator
+        if _fly_grid is None:
+            from .fly_grid import FlyExecutionGrid
+            _fly_grid = FlyExecutionGrid()
+        return _fly_grid
     else:
         # Default: local in-memory implementation
         if _service is None:
