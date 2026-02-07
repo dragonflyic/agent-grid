@@ -14,6 +14,7 @@ from .budget_manager import BudgetManager, get_budget_manager
 from .management_loop import ManagementLoop, get_management_loop
 from .database import Database, get_database
 from .chat_logger import AgentEventLogger, get_agent_event_logger
+from .scanner import Scanner, get_scanner
 
 __all__ = [
     # Public API - Models
@@ -35,4 +36,6 @@ __all__ = [
     "get_database",
     "AgentEventLogger",
     "get_agent_event_logger",
+    "Scanner",
+    "get_scanner",
 ]
