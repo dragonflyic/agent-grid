@@ -95,9 +95,9 @@ class PRMonitor:
             if new_reviews or new_comments:
                 all_feedback = "\n\n---\n\n".join(new_reviews + new_comments)
 
-                # Extract linked issue number from PR body
+                # Extract linked issue number (branch name is reliable, PR body is fallback)
                 pr_body = pr.get("body", "") or ""
-                issue_id = self._extract_issue_number(pr_body)
+                issue_id = self._extract_issue_from_branch(head_branch) or self._extract_issue_number(pr_body)
 
                 prs_needing_attention.append(
                     {
@@ -172,7 +172,7 @@ class PRMonitor:
                 continue
 
             pr_body = pr.get("body", "") or ""
-            issue_id = self._extract_issue_number(pr_body)
+            issue_id = self._extract_issue_from_branch(head_branch) or self._extract_issue_number(pr_body)
 
             prs_with_feedback.append(
                 {
@@ -189,6 +189,13 @@ class PRMonitor:
         )
 
         return prs_with_feedback
+
+    def _extract_issue_from_branch(self, branch: str) -> str | None:
+        """Extract issue number from agent branch name (agent/42 or agent/42-retry)."""
+        import re
+
+        match = re.match(r"agent/(\d+)", branch)
+        return match.group(1) if match else None
 
     def _extract_issue_number(self, pr_body: str) -> str | None:
         """Extract linked issue number from PR body (Closes #N)."""
