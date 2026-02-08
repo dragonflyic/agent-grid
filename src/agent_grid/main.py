@@ -60,21 +60,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db = get_database()
     db_task = asyncio.create_task(_connect_database_background(db, logger))
 
-    # Start SQS grid result listener if in coordinator mode
-    if settings.deployment_mode == "coordinator":
-        grid = get_execution_grid()
-        if hasattr(grid, "start"):
-            await grid.start()
-            logger.info("SQS grid started")
-
     # Start scheduler
     scheduler = get_scheduler()
     await scheduler.start()
     logger.info("Scheduler started")
 
-    # Start management loop
+    # Start management loop (7-phase cron)
     management_loop = get_management_loop()
     await management_loop.start()
+    logger.info("Management loop started")
 
     # Start agent event logger for real-time streaming
     agent_logger = get_agent_event_logger()
@@ -89,16 +83,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await management_loop.stop()
     await scheduler.stop()
 
-    # Stop SQS grid if in coordinator mode
-    if settings.deployment_mode == "coordinator":
-        grid = get_execution_grid()
-        if hasattr(grid, "stop"):
-            await grid.stop()
-
     await event_bus.stop()
 
     tracker = get_issue_tracker()
     await tracker.close()
+
+    # Close Fly client if in coordinator mode
+    if settings.deployment_mode == "coordinator":
+        from .fly import get_fly_client
+        fly_client = get_fly_client()
+        await fly_client.close()
 
     # Wait for db connection task and close if connected
     if not db_task.done():
