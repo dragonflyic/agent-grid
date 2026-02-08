@@ -130,7 +130,7 @@ class Scheduler:
                     repo = self._extract_repo_from_url(execution.repo_url)
                     if repo:
                         labels = get_label_manager()
-                        await labels.transition_to(repo, issue_id, "ai-review-pending")
+                        await labels.transition_to(repo, issue_id, "ag/review-pending")
 
         # Process any pending nudges now that we have capacity
         await self._process_pending_nudges()
@@ -153,7 +153,7 @@ class Scheduler:
                     repo = self._extract_repo_from_url(execution.repo_url)
                     if repo:
                         labels = get_label_manager()
-                        await labels.transition_to(repo, issue_id, "ai-failed")
+                        await labels.transition_to(repo, issue_id, "ag/failed")
 
         await self._process_pending_nudges()
 
@@ -225,8 +225,7 @@ class Scheduler:
 
     def _should_auto_launch(self, labels: list[str]) -> bool:
         """Determine if an issue should auto-launch an agent."""
-        trigger_labels = {"agent", "automated", "agent-grid"}
-        return bool(set(labels) & trigger_labels)
+        return any(label.startswith("ag/") for label in labels)
 
     def _extract_repo_from_url(self, repo_url: str) -> str | None:
         """Extract owner/repo from a git URL."""

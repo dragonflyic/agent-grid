@@ -105,7 +105,7 @@ class ManagementLoop:
             elif classification.category == "COMPLEX":
                 await planner.decompose(repo, issue.number, issue.title, issue.body or "")
             elif classification.category == "BLOCKED":
-                await labels.transition_to(repo, issue.id, "ai-blocked")
+                await labels.transition_to(repo, issue.id, "ag/blocked")
                 question = classification.blocking_question or classification.reason
                 comment = embed_metadata(
                     f"**Agent needs clarification:**\n\n{question}",
@@ -114,7 +114,7 @@ class ManagementLoop:
                 await self._tracker.add_comment(repo, issue.id, comment)
                 logger.info(f"Issue #{issue.number}: BLOCKED — posted question")
             elif classification.category == "SKIP":
-                await labels.transition_to(repo, issue.id, "ai-skipped")
+                await labels.transition_to(repo, issue.id, "ag/skipped")
                 await self._tracker.add_comment(
                     repo,
                     issue.id,
@@ -156,7 +156,7 @@ class ManagementLoop:
         from ..execution_grid import ExecutionConfig, get_execution_grid
 
         labels = get_label_manager()
-        await labels.transition_to(repo, issue.id, "ai-in-progress")
+        await labels.transition_to(repo, issue.id, "ag/in-progress")
 
         prompt = build_prompt(issue, repo, mode="implement")
         config = ExecutionConfig(
@@ -239,7 +239,7 @@ class ManagementLoop:
         retry_count = (issue_state or {}).get("retry_count", 0)
         if retry_count >= settings.max_retries_per_issue:
             labels = get_label_manager()
-            await labels.transition_to(repo, issue_id, "ai-failed")
+            await labels.transition_to(repo, issue_id, "ag/failed")
             await self._tracker.add_comment(
                 repo,
                 issue_id,
@@ -275,7 +275,7 @@ class ManagementLoop:
         )
 
         labels = get_label_manager()
-        await labels.transition_to(repo, issue_id, "ai-in-progress")
+        await labels.transition_to(repo, issue_id, "ag/in-progress")
 
         from ..execution_grid import AgentExecution
 
