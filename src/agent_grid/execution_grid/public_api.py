@@ -54,6 +54,8 @@ class EventType(str, Enum):
     ISSUE_CREATED = "issue.created"
     ISSUE_UPDATED = "issue.updated"
     NUDGE_REQUESTED = "nudge.requested"
+    PR_REVIEW = "pr.review"
+    PR_CLOSED = "pr.closed"
 
 
 class Event(BaseModel):

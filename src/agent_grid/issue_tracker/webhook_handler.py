@@ -54,6 +54,10 @@ async def handle_github_webhook(
         await _handle_issue_event(data)
     elif x_github_event == "issue_comment":
         await _handle_issue_comment_event(data)
+    elif x_github_event == "pull_request_review":
+        await _handle_pr_review_event(data)
+    elif x_github_event == "pull_request":
+        await _handle_pr_event(data)
     elif x_github_event == "ping":
         return {"status": "pong"}
 
@@ -121,3 +125,46 @@ async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
                 "comment_body": comment_body,
             },
         )
+
+
+async def _handle_pr_review_event(data: dict[str, Any]) -> None:
+    """Handle PR review submission."""
+    action = data.get("action")
+    if action != "submitted":
+        return
+    pr = data.get("pull_request", {})
+    head_branch = pr.get("head", {}).get("ref", "")
+    if not head_branch.startswith("agent/"):
+        return
+    repo = data.get("repository", {}).get("full_name", "")
+    await event_bus.publish(
+        EventType.PR_REVIEW,
+        {
+            "repo": repo,
+            "pr_number": pr.get("number"),
+            "branch": head_branch,
+            "review_state": data.get("review", {}).get("state"),
+        },
+    )
+
+
+async def _handle_pr_event(data: dict[str, Any]) -> None:
+    """Handle PR closed/merged events."""
+    action = data.get("action")
+    if action != "closed":
+        return
+    pr = data.get("pull_request", {})
+    head_branch = pr.get("head", {}).get("ref", "")
+    if not head_branch.startswith("agent/"):
+        return
+    repo = data.get("repository", {}).get("full_name", "")
+    merged = pr.get("merged", False)
+    await event_bus.publish(
+        EventType.PR_CLOSED,
+        {
+            "repo": repo,
+            "pr_number": pr.get("number"),
+            "branch": head_branch,
+            "merged": merged,
+        },
+    )
