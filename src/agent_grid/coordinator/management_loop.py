@@ -22,7 +22,6 @@ from .budget_manager import get_budget_manager
 from .classifier import get_classifier
 from .database import get_database
 from .dependency_resolver import get_dependency_resolver
-from .planner import get_planner
 from .pr_monitor import get_pr_monitor
 from .prompt_builder import build_prompt
 from .scanner import get_scanner
@@ -82,7 +81,6 @@ class ManagementLoop:
         # Phase 2 + 3: Classify and act
         classifier = get_classifier()
         budget = get_budget_manager()
-        planner = get_planner()
         labels = get_label_manager()
 
         for issue in candidates:
@@ -103,7 +101,7 @@ class ManagementLoop:
             if classification.category == "SIMPLE":
                 await self._launch_simple(repo, issue)
             elif classification.category == "COMPLEX":
-                await planner.decompose(repo, issue.number, issue.title, issue.body or "")
+                await self._launch_planner(repo, issue)
             elif classification.category == "BLOCKED":
                 await labels.transition_to(repo, issue.id, "ag/blocked")
                 question = classification.blocking_question or classification.reason
@@ -186,6 +184,40 @@ class ManagementLoop:
         )
         await self._db.create_execution(execution, issue_id=issue.id)
         logger.info(f"Issue #{issue.number}: SIMPLE — launched agent {execution_id}")
+
+    async def _launch_planner(self, repo: str, issue) -> None:
+        """Launch an agent to decompose a COMPLEX issue into sub-issues."""
+        from ..execution_grid import ExecutionConfig, get_execution_grid
+
+        labels = get_label_manager()
+        await labels.transition_to(repo, issue.id, "ag/planning")
+
+        prompt = build_prompt(issue, repo, mode="plan")
+        config = ExecutionConfig(
+            repo_url=f"https://github.com/{repo}.git",
+            prompt=prompt,
+        )
+
+        grid = get_execution_grid()
+        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
+            execution_id = await grid.launch_agent(
+                config,
+                mode="plan",
+                issue_number=issue.number,
+            )
+        else:
+            execution_id = await grid.launch_agent(config)
+
+        from ..execution_grid import AgentExecution, ExecutionStatus
+
+        execution = AgentExecution(
+            id=execution_id,
+            repo_url=config.repo_url,
+            status=ExecutionStatus.PENDING,
+            prompt=prompt,
+        )
+        await self._db.create_execution(execution, issue_id=issue.id)
+        logger.info(f"Issue #{issue.number}: COMPLEX — launched planner agent {execution_id}")
 
     async def _launch_review_handler(self, repo: str, pr_info: dict) -> None:
         """Launch an agent to address PR review comments."""

@@ -2,6 +2,7 @@
 
 Modes:
 - implement: Fresh implementation of an issue
+- plan: Explore repo and decompose a complex issue into sub-issues
 - address_review: Address PR review comments on existing branch
 - retry_with_feedback: Retry after closed PR with human feedback
 """
@@ -55,7 +56,79 @@ Skills contain repo-specific coding standards, workflows, and tools.
 Follow any auto-triggered skills (user-invocable: false) — they define the repo's conventions.
 """
 
-    if mode == "implement":
+    if mode == "plan":
+        return f"""You are a senior tech lead planning work decomposition for a complex GitHub issue.
+
+## Repository
+- Repo: {repo}
+
+## Parent Issue #{issue.number}: {issue.title}
+
+{issue.body or "(no description)"}
+
+## Your Task
+Explore the codebase thoroughly, then decompose this issue into small, independent sub-tasks.
+
+### Step 1: Explore
+- Read the README, CLAUDE.md, and key config files (pyproject.toml, package.json, etc.)
+- Understand the architecture and code structure
+- Identify the files and modules relevant to this issue
+
+### Step 2: Plan
+Break the issue into sub-tasks where each sub-task:
+- Can be done in a single PR (< 200 lines changed)
+- Has a clear, specific scope
+- Includes concrete file paths that will need changes
+
+### Step 3: Create Sub-Issues
+For each sub-task, create a GitHub sub-issue:
+```bash
+gh issue create --repo {repo} --title "[Sub #{issue.number}] <title>" --body "<body>" --label "ag/sub-issue"
+```
+
+Each sub-issue body should include:
+- "Part of #{issue.number}" on the first line
+- What to implement and why
+- Specific files to modify
+- Acceptance criteria as a checklist
+
+If a sub-task depends on another, add the label "ag/waiting" too:
+```bash
+gh issue create --repo {repo} \
+  --title "[Sub #{issue.number}] <title>" --body "<body>" \
+  --label "ag/sub-issue" --label "ag/waiting"
+```
+
+### Step 4: Post Plan Summary
+After creating all sub-issues, post a summary comment on the parent issue:
+```bash
+gh issue comment {issue.number} --repo {repo} --body "## Implementation Plan
+
+<brief summary of approach>
+
+### Sub-tasks
+- #<N>: <title>
+- #<N>: <title>
+...
+
+### Risks
+- <any risks or concerns>"
+```
+
+Then label the parent as an epic:
+```bash
+gh issue edit {issue.number} --repo {repo} --add-label "ag/epic"
+gh issue edit {issue.number} --repo {repo} --remove-label "ag/planning"
+```
+
+## Rules
+- Do NOT write any code. Only explore and create sub-issues.
+- Create at most 10 sub-issues.
+- Each sub-task title must start with "[Sub #{issue.number}]".
+- Be specific — reference real file paths you found in the codebase.
+"""
+
+    elif mode == "implement":
         return (
             base
             + f"""
