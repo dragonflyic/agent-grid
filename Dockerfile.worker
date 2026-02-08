@@ -27,8 +27,12 @@ RUN npm install -g @anthropic-ai/claude-code
 # Install Python dependencies (only what the worker needs)
 RUN pip install --no-cache-dir claude-code-sdk httpx
 
+# Create non-root user (Claude Code refuses bypassPermissions as root)
+RUN useradd -m -s /bin/bash agent && chown -R agent:agent /workspace
+USER agent
+
 # Copy entrypoint
-COPY scripts/worker-entrypoint.sh /worker-entrypoint.sh
+COPY --chown=agent:agent scripts/worker-entrypoint.sh /worker-entrypoint.sh
 RUN chmod +x /worker-entrypoint.sh
 
 ENTRYPOINT ["/worker-entrypoint.sh"]

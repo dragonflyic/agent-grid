@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     fly_app_name: str = ""
     fly_worker_image: str = ""
     fly_worker_cpus: int = 2
-    fly_worker_memory_mb: int = 2048
+    fly_worker_memory_mb: int = 4096
     fly_worker_region: str = "iad"
 
     # Anthropic API (for classification/planning)

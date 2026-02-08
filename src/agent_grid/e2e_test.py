@@ -1,27 +1,33 @@
-"""End-to-end test: uses the real engine pipeline, runs agent locally, shows diff.
+"""End-to-end test: scan -> classify -> pick easiest -> spawn Fly Machine -> show logs.
 
-Uses our actual Scanner, Classifier, prompt_builder, and dry-run wrappers.
-Reads from your real GitHub repo. Runs a real Claude Code agent locally.
-Does NOT write anything to GitHub — no push, no PRs, no comments, no labels.
+Uses the real engine pipeline:
+- Scanner (Phase 1) to find unprocessed issues
+- Classifier (Phase 2) to classify via Claude API
+- prompt_builder to generate the agent prompt
+- FlyMachinesClient to spawn a real ephemeral worker
+
+Reads from your real GitHub repo. Spawns a real Fly Machine.
+Does NOT write anything to GitHub -- prompt tells agent not to push/PR.
 
 Usage:
-    AGENT_GRID_TARGET_REPO=myorg/myrepo \
-    AGENT_GRID_GITHUB_TOKEN=ghp_... \
-    AGENT_GRID_ANTHROPIC_API_KEY=sk-ant-... \
+    AGENT_GRID_TARGET_REPO=myorg/myrepo \\
+    AGENT_GRID_GITHUB_TOKEN=ghp_... \\
+    AGENT_GRID_ANTHROPIC_API_KEY=sk-ant-... \\
+    AGENT_GRID_FLY_API_TOKEN=... \\
+    AGENT_GRID_FLY_APP_NAME=agent-grid-workers \\
+    AGENT_GRID_FLY_WORKER_IMAGE=registry.fly.io/agent-grid-workers:latest \\
     python -m agent_grid.e2e_test
 
 Optional:
-    AGENT_GRID_E2E_ISSUE=42   — skip scanning/classification, test a specific issue
+    AGENT_GRID_E2E_ISSUE=42   -- skip scanning/classification, test a specific issue
 """
 
 import asyncio
-import json
 import logging
 import os
 import subprocess
 import sys
-import tempfile
-from pathlib import Path
+import time
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,12 +36,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agent_grid.e2e_test")
 
+# Local-test override appended to the real prompt
+LOCAL_TEST_OVERRIDE = """
+
+## E2E TEST MODE -- CRITICAL OVERRIDES
+You are running in a local end-to-end test. These rules OVERRIDE everything above:
+- Do NOT push to any remote. Do NOT run `git push`.
+- Do NOT create a pull request. Do NOT run `gh pr create`.
+- Do NOT post comments to GitHub issues. Do NOT run `gh issue comment`.
+- Do NOT run any `gh` commands at all.
+- Just implement, test, and commit locally.
+- Before you finish, run these commands and include their output in your final message:
+  ```
+  git log --oneline --all
+  git diff --stat HEAD~1..HEAD
+  ```
+  This lets us see what you did from the logs.
+"""
+
 
 async def main():
     from .config import settings
     from .dry_run import install_dry_run_wrappers
 
-    # ── Validate ─────────────────────────────────────────────────────────
+    # -- Validate ----------------------------------------------------------
     errors = []
     if not settings.target_repo:
         errors.append("AGENT_GRID_TARGET_REPO=owner/repo")
@@ -43,6 +67,12 @@ async def main():
         errors.append("AGENT_GRID_GITHUB_TOKEN=ghp_...")
     if not settings.anthropic_api_key:
         errors.append("AGENT_GRID_ANTHROPIC_API_KEY=sk-ant-...")
+    if not settings.fly_api_token:
+        errors.append("AGENT_GRID_FLY_API_TOKEN=...")
+    if not settings.fly_app_name:
+        errors.append("AGENT_GRID_FLY_APP_NAME=agent-grid-workers")
+    if not settings.fly_worker_image:
+        errors.append("AGENT_GRID_FLY_WORKER_IMAGE=registry.fly.io/...")
     if errors:
         print("ERROR: Missing environment variables:")
         for e in errors:
@@ -51,13 +81,15 @@ async def main():
 
     repo = settings.target_repo
     print(f"\n{'='*60}")
-    print(f"  End-to-end test for: {repo}")
+    print(f"  E2E Test: {repo}")
+    print(f"  Fly app:  {settings.fly_app_name}")
+    print(f"  Image:    {settings.fly_worker_image}")
     print(f"{'='*60}\n")
 
-    # ── Install dry-run wrappers (real reads, logged writes) ─────────────
+    # -- Install dry-run wrappers (real reads, no writes to GitHub) --------
     install_dry_run_wrappers()
 
-    # ── Phase 1 & 2: Use our real Scanner and Classifier ─────────────────
+    # -- Phase 1 & 2: Scan and Classify using our real engine --------------
     from .coordinator.scanner import get_scanner
     from .coordinator.classifier import get_classifier
     from .coordinator.prompt_builder import build_prompt
@@ -69,10 +101,9 @@ async def main():
     if specific_issue:
         print(f"Using specified issue #{specific_issue}\n")
         issue = await tracker.get_issue(repo, specific_issue)
-        classification_info = "(user-specified, skipping classification)"
+        classification_info = "(user-specified)"
     else:
-        # Phase 1: Scan using our real Scanner
-        print("Phase 1: Scanning (using Scanner from coordinator.scanner)...")
+        print("Phase 1: Scanning (coordinator.scanner)...")
         scanner = get_scanner()
         candidates = await scanner.scan(repo)
 
@@ -86,201 +117,163 @@ async def main():
             labels_str = f" [{', '.join(iss.labels)}]" if iss.labels else ""
             print(f"  {i+1}. #{iss.number}: {iss.title}{labels_str}")
 
-        # Phase 2: Classify using our real Classifier
-        print(f"\nPhase 2: Classifying (using Classifier from coordinator.classifier)...")
+        print(f"\nPhase 2: Classifying (coordinator.classifier)...")
         classifier = get_classifier()
         classified = []
         for iss in candidates:
-            classification = await classifier.classify(iss)
-            classified.append((iss, classification))
-            symbol = {"SIMPLE": "+", "COMPLEX": "*", "BLOCKED": "!", "SKIP": "-"}.get(classification.category, "?")
-            print(f"  [{symbol}] #{iss.number}: {classification.category} "
-                  f"(complexity={classification.estimated_complexity}) "
-                  f"-- {classification.reason}")
+            c = await classifier.classify(iss)
+            classified.append((iss, c))
+            sym = {"SIMPLE": "+", "COMPLEX": "*", "BLOCKED": "!", "SKIP": "-"}.get(c.category, "?")
+            print(f"  [{sym}] #{iss.number}: {c.category} "
+                  f"(complexity={c.estimated_complexity}) -- {c.reason}")
 
-        # Pick the easiest SIMPLE issue
-        simple_issues = [
-            (iss, c) for iss, c in classified
-            if c.category == "SIMPLE"
-        ]
-        if not simple_issues:
-            print("\nNo SIMPLE issues found. Picking the least complex one.")
+        simple = [(iss, c) for iss, c in classified if c.category == "SIMPLE"]
+        if not simple:
+            print("\nNo SIMPLE issues. Picking least complex.")
             classified.sort(key=lambda x: x[1].estimated_complexity)
-            issue, classification = classified[0]
+            issue, cl = classified[0]
         else:
-            simple_issues.sort(key=lambda x: x[1].estimated_complexity)
-            issue, classification = simple_issues[0]
+            simple.sort(key=lambda x: x[1].estimated_complexity)
+            issue, cl = simple[0]
 
-        classification_info = (f"{classification.category} "
-                               f"(complexity={classification.estimated_complexity}): "
-                               f"{classification.reason}")
+        classification_info = f"{cl.category} (complexity={cl.estimated_complexity}): {cl.reason}"
 
     print(f"\n{'~'*60}")
     print(f"  Selected: #{issue.number} -- {issue.title}")
     print(f"  Classification: {classification_info}")
     print(f"{'~'*60}")
-
     if issue.body:
         preview = issue.body[:400] + ("..." if len(issue.body) > 400 else "")
-        print(f"\n  Body:\n  {preview}\n")
+        print(f"\n  {preview}\n")
 
-    # ── Phase 3: Build prompt using our real prompt_builder ───────────────
-    print("Phase 3: Building prompt (using prompt_builder.build_prompt)...")
-    raw_prompt = build_prompt(issue, repo, mode="implement")
+    # -- Phase 3: Build prompt using our real prompt_builder ---------------
+    print("Phase 3: Building prompt (coordinator.prompt_builder)...")
+    prompt = build_prompt(issue, repo, mode="implement") + LOCAL_TEST_OVERRIDE
+    print(f"  Prompt: {len(prompt)} chars")
 
-    # Append local-test override: don't push, don't create PR, don't comment
-    local_override = """
+    # -- Phase 4: Spawn Fly Machine using our real FlyMachinesClient -------
+    print(f"\nPhase 4: Spawning Fly Machine (fly.machines)...")
+    from .fly.machines import FlyMachinesClient
 
-## LOCAL TEST MODE OVERRIDE
-You are running in a local test. Additional rules:
-- The branch is already checked out for you. Do NOT run git checkout -b.
-- Implement the changes and commit them locally.
-- Do NOT push to any remote.
-- Do NOT create a pull request.
-- Do NOT run any `gh` commands.
-- Do NOT post comments to GitHub issues.
-- Just implement, test, and commit locally.
-"""
-    prompt = raw_prompt + local_override
+    fly = FlyMachinesClient()
+    execution_id = f"e2e-test-{issue.number}-{int(time.time())}"
 
-    print(f"  Prompt length: {len(prompt)} chars")
-    print(f"  Mode: implement")
-
-    # ── Phase 4: Clone repo and run agent ────────────────────────────────
-    workdir = tempfile.mkdtemp(prefix="agent-grid-e2e-")
-    repo_dir = os.path.join(workdir, "repo")
-
-    print(f"\nPhase 4: Cloning {repo}...")
-    clone_url = f"https://x-access-token:{settings.github_token}@github.com/{repo}.git"
-    result = subprocess.run(
-        ["git", "clone", "--depth=50", clone_url, repo_dir],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        print(f"ERROR: git clone failed:\n{result.stderr}")
+    try:
+        machine = await fly.spawn_worker(
+            execution_id=execution_id,
+            repo_url=f"https://github.com/{repo}.git",
+            issue_number=issue.number,
+            prompt=prompt,
+            mode="implement",
+        )
+    except Exception as e:
+        print(f"\nERROR: Failed to spawn Fly Machine: {e}")
+        await fly.close()
         await tracker.close()
         return
 
-    # Create the branch the prompt_builder expects
-    branch_name = f"agent/{issue.number}"
-    subprocess.run(
-        ["git", "checkout", "-b", branch_name],
-        cwd=repo_dir, capture_output=True,
-    )
-    print(f"  Cloned to: {repo_dir}")
-    print(f"  Branch: {branch_name}")
+    machine_id = machine["id"]
+    print(f"  Machine ID: {machine_id}")
+    print(f"  Name: {machine.get('name', '?')}")
+    print(f"  Region: {machine.get('region', '?')}")
+    print(f"  State: {machine.get('state', '?')}")
 
-    # Detect default branch name for diff later
-    default_branch_result = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "origin/HEAD"],
-        cwd=repo_dir, capture_output=True, text=True,
-    )
-    default_branch = default_branch_result.stdout.strip().replace("origin/", "") or "main"
-
-    # ── Phase 5: Run Claude Code SDK ─────────────────────────────────────
-    print(f"\nPhase 5: Running Claude Code agent...")
-    print(f"{'~'*60}")
-    print("  Agent output:")
+    # -- Phase 5: Stream logs and poll status ------------------------------
+    print(f"\n{'~'*60}")
+    print(f"  Fly Machine is running. Polling status...")
+    print(f"  To stream logs in another terminal:")
+    print(f"    fly logs -a {settings.fly_app_name} -i {machine_id}")
     print(f"{'~'*60}\n")
 
-    agent_result = ""
+    # Try to stream logs in background (optional — fly CLI may not be installed)
+    log_proc = None
     try:
-        from claude_code_sdk import query, ClaudeCodeOptions
-        from claude_code_sdk.types import AssistantMessage, ResultMessage, ToolUseMessage, ToolResultMessage
-
-        options = ClaudeCodeOptions(
-            cwd=repo_dir,
-            permission_mode="bypassPermissions",
+        log_proc = subprocess.Popen(
+            ["fly", "logs", "-a", settings.fly_app_name, "-i", machine_id],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
+    except FileNotFoundError:
+        print("  (fly CLI not installed — skipping log streaming, polling status only)")
 
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                text = message.content[:200] if isinstance(message.content, str) else str(message.content)[:200]
-                print(f"  [assistant] {text}")
-            elif isinstance(message, ResultMessage):
-                agent_result = message.result or ""
-                print(f"\n  [result] {agent_result[:500]}")
-            elif isinstance(message, ToolUseMessage):
-                print(f"  [tool] {message.tool_name}: {str(message.tool_input)[:150]}")
-            elif isinstance(message, ToolResultMessage):
-                output = str(message.content)[:200] if message.content else ""
-                print(f"  [tool_result] {output}")
+    # Poll machine status
+    final_state = "unknown"
+    poll_count = 0
+    max_polls = 180  # 30 min max (10s intervals)
 
-    except ImportError:
-        print("  claude-code-sdk not installed.")
-        print("  Install with: pip install claude-code-sdk")
-        print(f"\n  Prompt that WOULD be sent ({len(prompt)} chars):\n")
-        print(f"  {prompt[:800]}")
-        agent_result = "(sdk not installed)"
+    try:
+        while poll_count < max_polls:
+            await asyncio.sleep(10)
+            poll_count += 1
 
-    except Exception as e:
-        print(f"\n  Agent error: {e}")
-        agent_result = f"Error: {e}"
+            try:
+                status = await fly.get_machine_status(machine_id)
+                state = status.get("state", "unknown")
+            except Exception:
+                # Machine might be destroyed already
+                state = "destroyed"
 
-    # ── Phase 6: Show results ────────────────────────────────────────────
+            if poll_count % 6 == 0 or state not in ("started", "created"):
+                elapsed = poll_count * 10
+                print(f"  [{elapsed}s] Machine state: {state}")
+
+            # Print any available log output
+            if log_proc and log_proc.stdout:
+                while True:
+                    line = log_proc.stdout.readline()
+                    if not line:
+                        break
+                    print(f"  [log] {line.rstrip()}")
+
+            if state in ("stopped", "destroyed", "failed"):
+                final_state = state
+                break
+
+        if poll_count >= max_polls:
+            print(f"\n  Timeout after {max_polls * 10}s. Destroying machine...")
+            await fly.destroy_machine(machine_id)
+            final_state = "timeout"
+
+    except KeyboardInterrupt:
+        print("\n  Interrupted. Destroying machine...")
+        await fly.destroy_machine(machine_id)
+        final_state = "interrupted"
+
+    finally:
+        if log_proc:
+            log_proc.terminate()
+            try:
+                remaining, _ = log_proc.communicate(timeout=5)
+                if remaining:
+                    for line in remaining.strip().split("\n"):
+                        if line:
+                            print(f"  [log] {line}")
+            except Exception:
+                pass
+
+    # -- Phase 6: Results --------------------------------------------------
     print(f"\n{'='*60}")
-    print("  Results")
+    print(f"  Results")
     print(f"{'='*60}\n")
+    print(f"  Issue:    #{issue.number} -- {issue.title}")
+    print(f"  Machine:  {machine_id}")
+    print(f"  State:    {final_state}")
+    print(f"  Duration: ~{poll_count * 10}s")
 
-    # Show git log
-    log_result = subprocess.run(
-        ["git", "log", "--oneline", f"{default_branch}..{branch_name}"],
-        cwd=repo_dir, capture_output=True, text=True,
-    )
-    commits = log_result.stdout.strip()
-    if commits:
-        print("Commits:")
-        for line in commits.split("\n"):
-            print(f"  {line}")
-    else:
-        print("No commits were made by the agent.")
+    if final_state == "stopped":
+        print(f"\n  Machine completed successfully.")
+        print(f"  The agent's work (commits, diffs) was logged above.")
+        print(f"  Since this was a test, nothing was pushed to GitHub.")
+    elif final_state == "destroyed":
+        print(f"\n  Machine was destroyed (auto_destroy). Check logs above for results.")
+    elif final_state == "failed":
+        print(f"\n  Machine failed. Check logs above for errors.")
 
-    # Show diff stat
-    diff_stat = subprocess.run(
-        ["git", "diff", "--stat", f"{default_branch}..{branch_name}"],
-        cwd=repo_dir, capture_output=True, text=True,
-    )
-    if diff_stat.stdout.strip():
-        print(f"\nFiles changed:\n{diff_stat.stdout}")
+    print(f"\n  Full logs:")
+    print(f"    fly logs -a {settings.fly_app_name} -i {machine_id}")
 
-    # Full diff
-    diff_result = subprocess.run(
-        ["git", "diff", f"{default_branch}..{branch_name}"],
-        cwd=repo_dir, capture_output=True, text=True,
-    )
-
-    # Save artifacts
-    diff_file = Path(workdir) / "agent_diff.patch"
-    diff_file.write_text(diff_result.stdout)
-
-    prompt_file = Path(workdir) / "prompt.txt"
-    prompt_file.write_text(prompt)
-
-    summary_file = Path(workdir) / "e2e_summary.json"
-    summary_file.write_text(json.dumps({
-        "repo": repo,
-        "issue_number": issue.number,
-        "issue_title": issue.title,
-        "classification": classification_info,
-        "branch": branch_name,
-        "workdir": repo_dir,
-        "commits": commits,
-        "diff_stat": diff_stat.stdout.strip(),
-        "agent_result": agent_result[:2000],
-    }, indent=2))
-
-    print(f"Artifacts saved:")
-    print(f"  Prompt:  {prompt_file}")
-    print(f"  Diff:    {diff_file}")
-    print(f"  Summary: {summary_file}")
-    print(f"  Repo:    {repo_dir}")
-    print(f"\nInspect:")
-    print(f"  cd {repo_dir}")
-    print(f"  git log --oneline")
-    print(f"  git diff {default_branch}..{branch_name}")
-    print(f"\nClean up:")
-    print(f"  rm -rf {workdir}")
-
+    await fly.close()
     await tracker.close()
     print(f"\nDone. Nothing was written to GitHub.")
 

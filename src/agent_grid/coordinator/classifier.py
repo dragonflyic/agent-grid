@@ -80,6 +80,12 @@ class Classifier:
             )
 
             text = response.content[0].text.strip()
+            # Strip markdown code fences if present
+            if text.startswith("```"):
+                lines = text.split("\n")
+                # Remove first line (```json) and last line (```)
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                text = "\n".join(lines).strip()
             data = json.loads(text)
 
             classification = Classification(

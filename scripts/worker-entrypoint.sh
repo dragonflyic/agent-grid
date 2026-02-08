@@ -15,9 +15,14 @@ git config --global user.email "agent-grid@noreply.github.com"
 # Configure gh CLI auth
 echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
 
+# Configure git credentials for private repos
+git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+
 # Clone repo
+echo "Cloning $REPO_URL ..."
 git clone "$REPO_URL" /workspace/repo
 cd /workspace/repo
+echo "Clone complete. Branch: $(git branch --show-current)"
 
 # Run Claude Code SDK via Python
 python3 -c "
@@ -37,13 +42,18 @@ async def main():
         if isinstance(message, ResultMessage) and message.result:
             result = message.result
 
+    # Print result to stdout so it appears in Fly logs
+    print('=== AGENT RESULT ===')
+    print(result[:10000])
+    print('=== END RESULT ===')
+
     # Report back to orchestrator
     import httpx
     callback_url = os.environ.get('ORCHESTRATOR_URL', '') + '/api/agent-status'
     payload = {
         'execution_id': os.environ['EXECUTION_ID'],
         'status': 'completed',
-        'result': result[:10000],  # Truncate large results
+        'result': result[:10000],
     }
 
     try:
@@ -51,11 +61,16 @@ async def main():
             resp = await client.post(callback_url, json=payload)
             print(f'Reported status: {resp.status_code}')
     except Exception as e:
-        print(f'Failed to report status: {e}')
-        sys.exit(1)
+        print(f'Warning: Failed to report status: {e}')
+        # Don't exit(1) — the agent work is done, callback failure is non-fatal
 
 asyncio.run(main())
 " 2>&1 || {
+    echo "=== Agent failed, capturing git state ==="
+    cd /workspace/repo 2>/dev/null && {
+        git log --oneline -10 2>/dev/null || true
+        git diff --stat 2>/dev/null || true
+    }
     # Report failure
     python3 -c "
 import asyncio, os
@@ -68,11 +83,23 @@ async def report_failure():
         'status': 'failed',
         'result': 'Agent process exited with error',
     }
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        await client.post(callback_url, json=payload)
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await client.post(callback_url, json=payload)
+    except Exception as e:
+        print(f'Warning: Failed to report failure: {e}')
 
 asyncio.run(report_failure())
-"
+" || true
 }
+
+# Print final git state so it always shows in logs
+cd /workspace/repo 2>/dev/null && {
+    echo "=== GIT STATE ==="
+    git log --oneline -10 2>/dev/null || true
+    echo "---"
+    git diff --stat HEAD~1..HEAD 2>/dev/null || true
+    echo "=== END GIT STATE ==="
+} || true
 
 echo "=== Worker complete ==="
