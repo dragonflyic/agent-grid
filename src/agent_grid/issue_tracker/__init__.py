@@ -3,7 +3,7 @@
 from .api_routes import issues_router
 from .filesystem_client import FilesystemClient
 from .github_client import GitHubClient
-from .label_manager import AI_LABELS, LabelManager, get_label_manager
+from .label_manager import AG_LABELS, LabelManager, get_label_manager
 from .public_api import (
     # Models
     Comment,
@@ -32,7 +32,7 @@ __all__ = [
     "GitHubClient",
     "FilesystemClient",
     # Label management
-    "AI_LABELS",
+    "AG_LABELS",
     "LabelManager",
     "get_label_manager",
     # Routers

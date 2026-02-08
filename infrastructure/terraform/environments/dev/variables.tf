@@ -71,5 +71,6 @@ variable "fly_worker_image" {
 variable "dry_run" {
   description = "Enable dry-run mode (reads GitHub but logs writes instead of executing them)"
   type        = bool
-  default     = true
+  default     = false
 }
+

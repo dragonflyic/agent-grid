@@ -43,14 +43,14 @@ class TestBudgetManager:
 class TestScheduler:
     """Tests for Scheduler logic."""
 
-    def test_should_auto_launch_with_agent_label(self):
-        """Test auto-launch detection with agent label."""
+    def test_should_auto_launch_with_ag_label(self):
+        """Test auto-launch detection with ag/ label."""
         from agent_grid.coordinator.scheduler import Scheduler
 
         scheduler = Scheduler()
-        assert scheduler._should_auto_launch(["agent"]) is True
-        assert scheduler._should_auto_launch(["automated"]) is True
-        assert scheduler._should_auto_launch(["agent-grid"]) is True
+        assert scheduler._should_auto_launch(["ag/todo"]) is True
+        assert scheduler._should_auto_launch(["ag/in-progress"]) is True
+        assert scheduler._should_auto_launch(["ag/sub-issue"]) is True
 
     def test_should_not_auto_launch_without_label(self):
         """Test no auto-launch without trigger labels."""

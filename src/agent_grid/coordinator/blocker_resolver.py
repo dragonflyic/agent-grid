@@ -1,6 +1,6 @@
-"""Phase 7: Monitor ai-blocked issues for human responses.
+"""Phase 7: Monitor ag/blocked issues for human responses.
 
-When a human responds to a blocked issue, remove ai-blocked label
+When a human responds to a blocked issue, remove ag/blocked label
 so the scanner picks it up again next cycle.
 """
 
@@ -33,7 +33,7 @@ class BlockerResolver:
 
         blocked_issues = await self._tracker.list_issues(
             repo,
-            labels=["ai-blocked"],
+            labels=["ag/blocked"],
         )
 
         last_check_state = await self._db.get_cron_state("last_blocker_check")
@@ -52,7 +52,7 @@ class BlockerResolver:
 
             if has_new_comments:
                 # Unblock: remove ai-blocked, scanner will pick it up
-                await self._labels.remove_label(repo, issue.id, "ai-blocked")
+                await self._labels.remove_label(repo, issue.id, "ag/blocked")
                 logger.info(f"Unblocked issue #{issue.number} — human responded")
                 unblocked.append(issue.id)
 

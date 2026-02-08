@@ -31,7 +31,6 @@ async def main() -> int:
     logger.info("Starting scheduled coordinator cycle...")
 
     if not is_dry_run:
-        # Real mode: connect DB, acquire advisory lock
         from .coordinator.database import get_database
 
         db = get_database()
@@ -55,7 +54,6 @@ async def main() -> int:
         return 1
     finally:
         if not is_dry_run:
-            # Release advisory lock and clean up real connections
             async with pool.acquire() as conn:
                 await conn.execute("SELECT pg_advisory_unlock(42)")
 
@@ -69,7 +67,6 @@ async def main() -> int:
 
             await db.close()
 
-        # Always close the issue tracker (real HTTP client in both modes)
         from .issue_tracker import get_issue_tracker
 
         try:

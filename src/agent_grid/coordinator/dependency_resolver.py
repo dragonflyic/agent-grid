@@ -2,7 +2,7 @@
 
 When a sub-issue is completed (PR merged, issue closed), check if
 other sub-issues were waiting on it. If all dependencies are resolved,
-remove ai-waiting label so scanner picks them up.
+remove ag/waiting label so scanner picks them up.
 
 Also checks if all sub-issues of a parent are done, and closes the parent.
 """
@@ -25,7 +25,7 @@ class DependencyResolver:
 
     async def check_dependencies(self, repo: str) -> None:
         """Check all ai-waiting issues and unblock those with resolved deps."""
-        waiting_issues = await self._tracker.list_issues(repo, labels=["ai-waiting"])
+        waiting_issues = await self._tracker.list_issues(repo, labels=["ag/waiting"])
 
         for issue in waiting_issues:
             all_deps_resolved = True
@@ -39,7 +39,7 @@ class DependencyResolver:
                     continue
 
             if all_deps_resolved:
-                await self._labels.remove_label(repo, issue.id, "ai-waiting")
+                await self._labels.remove_label(repo, issue.id, "ag/waiting")
                 logger.info(f"Unblocked sub-issue #{issue.number} — all dependencies resolved")
 
     async def check_parent_completion(self, repo: str) -> list[int]:
@@ -47,8 +47,8 @@ class DependencyResolver:
 
         Returns list of parent issue numbers that were closed.
         """
-        # Get all issues labeled "epic"
-        epic_issues = await self._tracker.list_issues(repo, labels=["epic"])
+        # Get all issues labeled "ag/epic"
+        epic_issues = await self._tracker.list_issues(repo, labels=["ag/epic"])
         closed_parents = []
 
         for parent in epic_issues:
@@ -67,7 +67,7 @@ class DependencyResolver:
                     "All sub-tasks completed! Closing parent issue.",
                 )
                 await self._tracker.update_issue_status(repo, parent.id, IssueStatus.CLOSED)
-                await self._labels.transition_to(repo, parent.id, "ai-done")
+                await self._labels.transition_to(repo, parent.id, "ag/done")
                 logger.info(f"Closed parent issue #{parent.number} — all sub-issues done")
                 closed_parents.append(parent.number)
 
