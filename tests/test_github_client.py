@@ -1,8 +1,9 @@
 """Tests for GitHub client implementation."""
 
 import os
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from agent_grid.issue_tracker import IssueStatus
 from agent_grid.issue_tracker.github_client import GitHubClient
@@ -20,6 +21,7 @@ class TestGitHubClientParsing:
             client._client = None
             # Set up the patterns (parent_id is now from sub-issues API, not body)
             import re
+
             client.BLOCKED_BY_PATTERN = re.compile(r"^Blocked by:\s*(.+)$", re.MULTILINE)
             client.ISSUE_REF_PATTERN = re.compile(r"#(\d+)")
             client.IN_PROGRESS_LABEL = "in-progress"

@@ -1,0 +1,44 @@
+name: Infrastructure
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infrastructure/terraform/**"
+      - "digger.yml"
+  issue_comment:
+    types: [created]
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/terraform/**"
+      - "digger.yml"
+
+permissions:
+  contents: write
+  actions: write
+  id-token: write
+  pull-requests: write
+  issues: read
+  statuses: write
+
+jobs:
+  digger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-west-2
+
+      - name: Run Digger
+        uses: diggerhq/digger@v0.6.0
+        with:
+          setup-opentofu: true
+          opentofu-version: "1.9.0"
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,18 +1,18 @@
 """Implementation of the ExecutionGrid service."""
 
-from typing import Callable, Awaitable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 from uuid import UUID, uuid4
 
+from ..config import settings
+from .agent_runner import get_agent_runner
+from .event_bus import event_bus
 from .public_api import (
-    AgentExecution,
     AgentEventHandler,
+    AgentExecution,
     Event,
     ExecutionConfig,
     ExecutionGrid,
 )
-from .event_bus import event_bus
-from .agent_runner import get_agent_runner
-from ..config import settings
 
 if TYPE_CHECKING:
     from .fly_grid import FlyExecutionGrid
@@ -59,6 +59,7 @@ class ExecutionGridService(ExecutionGrid):
 
         The handler is called with (event_type: str, payload: dict).
         """
+
         async def event_handler(event: Event) -> None:
             await handler(event.type.value, event.payload)
 
@@ -92,6 +93,7 @@ def get_execution_grid() -> ExecutionGrid:
         # Fly Machines-based implementation for cloud coordinator
         if _fly_grid is None:
             from .fly_grid import FlyExecutionGrid
+
             _fly_grid = FlyExecutionGrid()
         return _fly_grid
     else:

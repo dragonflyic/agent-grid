@@ -1,21 +1,21 @@
 """Execution grid module for launching and managing coding agents."""
 
+from .event_bus import EventBus, event_bus
+from .fly_grid import FlyExecutionGrid, get_fly_execution_grid
 from .public_api import (
+    # Type aliases
+    AgentEventHandler,
     # Models
     AgentExecution,
     Event,
     EventType,
     ExecutionConfig,
-    ExecutionStatus,
-    utc_now,
-    # Type aliases
-    AgentEventHandler,
     # ABC interface
     ExecutionGrid,
+    ExecutionStatus,
+    utc_now,
 )
-from .service import get_execution_grid, ExecutionGridService
-from .event_bus import EventBus, event_bus
-from .fly_grid import FlyExecutionGrid, get_fly_execution_grid
+from .service import ExecutionGridService, get_execution_grid
 
 __all__ = [
     # Public API - Models

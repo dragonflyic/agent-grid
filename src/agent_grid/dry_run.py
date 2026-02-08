@@ -15,18 +15,17 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from .config import settings
-from .issue_tracker.public_api import (
-    IssueInfo,
-    IssueStatus,
-    IssueTracker,
-)
-from .issue_tracker.github_client import GitHubClient
 from .execution_grid.public_api import (
-    AgentExecution,
     AgentEventHandler,
+    AgentExecution,
     ExecutionConfig,
     ExecutionGrid,
     ExecutionStatus,
+)
+from .issue_tracker.github_client import GitHubClient
+from .issue_tracker.public_api import (
+    IssueInfo,
+    IssueStatus,
 )
 
 logger = logging.getLogger("agent_grid.dry_run")
@@ -150,9 +149,7 @@ class DryRunIssueTracker(GitHubClient):
             body=body[:500],
         )
 
-    async def update_issue_status(
-        self, repo: str, issue_id: str, status: IssueStatus
-    ) -> None:
+    async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         self._log.log(
             "update_issue_status",
             repo=repo,
@@ -204,10 +201,7 @@ class DryRunDatabase:
         return results
 
     async def get_running_executions(self) -> list[AgentExecution]:
-        return [
-            e["execution"] for e in self._executions.values()
-            if e["execution"].status == ExecutionStatus.RUNNING
-        ]
+        return [e["execution"] for e in self._executions.values() if e["execution"].status == ExecutionStatus.RUNNING]
 
     async def get_execution_for_issue(self, issue_id: str) -> AgentExecution | None:
         for e in self._executions.values():
@@ -321,10 +315,10 @@ def install_dry_run_wrappers() -> None:
 
     Call this before any services are initialized.
     """
-    import agent_grid.issue_tracker.public_api as tracker_api
-    import agent_grid.issue_tracker.label_manager as label_mod
-    import agent_grid.execution_grid.service as grid_service
     import agent_grid.coordinator.database as db_mod
+    import agent_grid.execution_grid.service as grid_service
+    import agent_grid.issue_tracker.label_manager as label_mod
+    import agent_grid.issue_tracker.public_api as tracker_api
 
     # Force dry_run on
     settings.dry_run = True
@@ -352,12 +346,13 @@ def install_dry_run_wrappers() -> None:
 
     # Reset service singletons that cache references to the real tracker/labels
     # so they pick up the dry-run wrappers when re-initialized
-    import agent_grid.coordinator.scanner as scanner_mod
+    import agent_grid.coordinator.blocker_resolver as blocker_mod
+    import agent_grid.coordinator.budget_manager as budget_mod
+    import agent_grid.coordinator.dependency_resolver as dep_mod
     import agent_grid.coordinator.planner as planner_mod
     import agent_grid.coordinator.pr_monitor as pr_monitor_mod
-    import agent_grid.coordinator.blocker_resolver as blocker_mod
-    import agent_grid.coordinator.dependency_resolver as dep_mod
-    import agent_grid.coordinator.budget_manager as budget_mod
+    import agent_grid.coordinator.scanner as scanner_mod
+
     scanner_mod._scanner = None
     planner_mod._planner = None
     pr_monitor_mod._pr_monitor = None
@@ -383,11 +378,13 @@ async def run_single_cycle() -> str:
 
     # Run one cycle
     from .coordinator.management_loop import ManagementLoop
+
     loop = ManagementLoop()
     await loop.run_once()
 
     # Cleanup
     import agent_grid.issue_tracker.public_api as tracker_api
+
     if tracker_api._issue_tracker:
         await tracker_api._issue_tracker.close()
 
@@ -398,4 +395,5 @@ async def run_single_cycle() -> str:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(run_single_cycle())

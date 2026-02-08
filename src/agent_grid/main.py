@@ -8,6 +8,17 @@ from typing import AsyncGenerator
 import uvicorn
 from fastapi import FastAPI
 
+from .config import settings
+from .coordinator import (
+    coordinator_router,
+    get_agent_event_logger,
+    get_database,
+    get_management_loop,
+    get_scheduler,
+)
+from .execution_grid import event_bus
+from .issue_tracker import get_issue_tracker, issues_router, webhook_router
+
 # Configure logging for agent event streaming
 logging.basicConfig(
     level=logging.INFO,
@@ -16,17 +27,6 @@ logging.basicConfig(
 )
 # Ensure agent event logger is visible
 logging.getLogger("agent_grid.agent").setLevel(logging.INFO)
-
-from .execution_grid import event_bus, get_execution_grid
-from .config import settings
-from .coordinator import (
-    coordinator_router,
-    get_database,
-    get_management_loop,
-    get_scheduler,
-    get_agent_event_logger,
-)
-from .issue_tracker import webhook_router, issues_router, get_issue_tracker
 
 
 async def _connect_database_background(db, logger) -> None:
@@ -91,6 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Close Fly client if in coordinator mode
     if settings.deployment_mode == "coordinator":
         from .fly import get_fly_client
+
         fly_client = get_fly_client()
         await fly_client.close()
 

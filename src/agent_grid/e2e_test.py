@@ -80,19 +80,19 @@ async def main():
         sys.exit(1)
 
     repo = settings.target_repo
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  E2E Test: {repo}")
     print(f"  Fly app:  {settings.fly_app_name}")
     print(f"  Image:    {settings.fly_worker_image}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # -- Install dry-run wrappers (real reads, no writes to GitHub) --------
     install_dry_run_wrappers()
 
     # -- Phase 1 & 2: Scan and Classify using our real engine --------------
-    from .coordinator.scanner import get_scanner
     from .coordinator.classifier import get_classifier
     from .coordinator.prompt_builder import build_prompt
+    from .coordinator.scanner import get_scanner
     from .issue_tracker import get_issue_tracker
 
     tracker = get_issue_tracker()
@@ -115,17 +115,16 @@ async def main():
         print(f"Found {len(candidates)} candidate issues:")
         for i, iss in enumerate(candidates[:15]):
             labels_str = f" [{', '.join(iss.labels)}]" if iss.labels else ""
-            print(f"  {i+1}. #{iss.number}: {iss.title}{labels_str}")
+            print(f"  {i + 1}. #{iss.number}: {iss.title}{labels_str}")
 
-        print(f"\nPhase 2: Classifying (coordinator.classifier)...")
+        print("\nPhase 2: Classifying (coordinator.classifier)...")
         classifier = get_classifier()
         classified = []
         for iss in candidates:
             c = await classifier.classify(iss)
             classified.append((iss, c))
             sym = {"SIMPLE": "+", "COMPLEX": "*", "BLOCKED": "!", "SKIP": "-"}.get(c.category, "?")
-            print(f"  [{sym}] #{iss.number}: {c.category} "
-                  f"(complexity={c.estimated_complexity}) -- {c.reason}")
+            print(f"  [{sym}] #{iss.number}: {c.category} (complexity={c.estimated_complexity}) -- {c.reason}")
 
         simple = [(iss, c) for iss, c in classified if c.category == "SIMPLE"]
         if not simple:
@@ -138,10 +137,10 @@ async def main():
 
         classification_info = f"{cl.category} (complexity={cl.estimated_complexity}): {cl.reason}"
 
-    print(f"\n{'~'*60}")
+    print(f"\n{'~' * 60}")
     print(f"  Selected: #{issue.number} -- {issue.title}")
     print(f"  Classification: {classification_info}")
-    print(f"{'~'*60}")
+    print(f"{'~' * 60}")
     if issue.body:
         preview = issue.body[:400] + ("..." if len(issue.body) > 400 else "")
         print(f"\n  {preview}\n")
@@ -152,7 +151,7 @@ async def main():
     print(f"  Prompt: {len(prompt)} chars")
 
     # -- Phase 4: Spawn Fly Machine using our real FlyMachinesClient -------
-    print(f"\nPhase 4: Spawning Fly Machine (fly.machines)...")
+    print("\nPhase 4: Spawning Fly Machine (fly.machines)...")
     from .fly.machines import FlyMachinesClient
 
     fly = FlyMachinesClient()
@@ -179,11 +178,11 @@ async def main():
     print(f"  State: {machine.get('state', '?')}")
 
     # -- Phase 5: Stream logs and poll status ------------------------------
-    print(f"\n{'~'*60}")
-    print(f"  Fly Machine is running. Polling status...")
-    print(f"  To stream logs in another terminal:")
+    print(f"\n{'~' * 60}")
+    print("  Fly Machine is running. Polling status...")
+    print("  To stream logs in another terminal:")
     print(f"    fly logs -a {settings.fly_app_name} -i {machine_id}")
-    print(f"{'~'*60}\n")
+    print(f"{'~' * 60}\n")
 
     # Try to stream logs in background (optional — fly CLI may not be installed)
     log_proc = None
@@ -253,29 +252,29 @@ async def main():
                 pass
 
     # -- Phase 6: Results --------------------------------------------------
-    print(f"\n{'='*60}")
-    print(f"  Results")
-    print(f"{'='*60}\n")
+    print(f"\n{'=' * 60}")
+    print("  Results")
+    print(f"{'=' * 60}\n")
     print(f"  Issue:    #{issue.number} -- {issue.title}")
     print(f"  Machine:  {machine_id}")
     print(f"  State:    {final_state}")
     print(f"  Duration: ~{poll_count * 10}s")
 
     if final_state == "stopped":
-        print(f"\n  Machine completed successfully.")
-        print(f"  The agent's work (commits, diffs) was logged above.")
-        print(f"  Since this was a test, nothing was pushed to GitHub.")
+        print("\n  Machine completed successfully.")
+        print("  The agent's work (commits, diffs) was logged above.")
+        print("  Since this was a test, nothing was pushed to GitHub.")
     elif final_state == "destroyed":
-        print(f"\n  Machine was destroyed (auto_destroy). Check logs above for results.")
+        print("\n  Machine was destroyed (auto_destroy). Check logs above for results.")
     elif final_state == "failed":
-        print(f"\n  Machine failed. Check logs above for errors.")
+        print("\n  Machine failed. Check logs above for errors.")
 
-    print(f"\n  Full logs:")
+    print("\n  Full logs:")
     print(f"    fly logs -a {settings.fly_app_name} -i {machine_id}")
 
     await fly.close()
     await tracker.close()
-    print(f"\nDone. Nothing was written to GitHub.")
+    print("\nDone. Nothing was written to GitHub.")
 
 
 if __name__ == "__main__":

@@ -85,9 +85,7 @@ class GitHubClient(IssueTracker):
                 break
 
             for item in data:
-                created_at = datetime.fromisoformat(
-                    item["created_at"].replace("Z", "+00:00")
-                )
+                created_at = datetime.fromisoformat(item["created_at"].replace("Z", "+00:00"))
                 comments.append(
                     Comment(
                         id=str(item["id"]),
@@ -286,9 +284,7 @@ class GitHubClient(IssueTracker):
         )
         response.raise_for_status()
 
-    async def update_issue_status(
-        self, repo: str, issue_id: str, status: IssueStatus
-    ) -> None:
+    async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         """Update the status of an issue."""
         await self.update_issue(repo, issue_id, status=status)
 

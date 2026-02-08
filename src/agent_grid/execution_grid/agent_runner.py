@@ -7,23 +7,23 @@ from pathlib import Path
 from uuid import UUID
 
 from claude_code_sdk import query
-
-logger = logging.getLogger("agent_grid.agent")
 from claude_code_sdk.types import (
-    ClaudeCodeOptions,
     AssistantMessage,
+    ClaudeCodeOptions,
     ResultMessage,
     SystemMessage,
-    UserMessage,
     TextBlock,
-    ToolUseBlock,
     ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
 )
 
-from .public_api import AgentExecution, ExecutionConfig, ExecutionStatus, utc_now
 from ..config import settings
 from .event_publisher import event_publisher
+from .public_api import AgentExecution, ExecutionConfig, ExecutionStatus, utc_now
 from .repo_manager import get_repo_manager
+
+logger = logging.getLogger("agent_grid.agent")
 
 
 class AgentRunner:

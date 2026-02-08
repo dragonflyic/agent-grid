@@ -6,9 +6,7 @@ so the scanner picks it up again next cycle.
 
 import logging
 
-from ..config import settings
 from ..issue_tracker import get_issue_tracker
-from ..issue_tracker.public_api import IssueStatus
 from ..issue_tracker.label_manager import get_label_manager
 from .database import get_database
 
@@ -29,11 +27,13 @@ class BlockerResolver:
         Returns list of issue IDs that were unblocked.
         """
         from ..issue_tracker.github_client import GitHubClient
+
         if not isinstance(self._tracker, GitHubClient):
             return []
 
         blocked_issues = await self._tracker.list_issues(
-            repo, labels=["ai-blocked"],
+            repo,
+            labels=["ai-blocked"],
         )
 
         last_check_state = await self._db.get_cron_state("last_blocker_check")
@@ -57,6 +57,7 @@ class BlockerResolver:
                 unblocked.append(issue.id)
 
         from datetime import datetime
+
         await self._db.set_cron_state(
             "last_blocker_check",
             {"timestamp": datetime.utcnow().isoformat()},

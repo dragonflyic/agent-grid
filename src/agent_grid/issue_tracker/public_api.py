@@ -10,10 +10,10 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-
 # =============================================================================
 # Utilities
 # =============================================================================
+
 
 def utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
@@ -23,6 +23,7 @@ def utc_now() -> datetime:
 # =============================================================================
 # Models
 # =============================================================================
+
 
 class IssueStatus(str, Enum):
     """Status of an issue."""
@@ -61,6 +62,7 @@ class IssueInfo(BaseModel):
 # =============================================================================
 # Service Interface (ABC)
 # =============================================================================
+
 
 class IssueTracker(ABC):
     """Abstract interface for issue tracking systems."""
@@ -150,9 +152,7 @@ class IssueTracker(ABC):
         pass
 
     @abstractmethod
-    async def update_issue_status(
-        self, repo: str, issue_id: str, status: IssueStatus
-    ) -> None:
+    async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         """
         Update the status of an issue.
 

@@ -2,9 +2,9 @@
 
 from uuid import UUID, uuid4
 
-from ..execution_grid import event_bus, EventType
-from .public_api import NudgeRequest
+from ..execution_grid import EventType, event_bus
 from .database import get_database
+from .public_api import NudgeRequest
 
 
 class NudgeHandler:

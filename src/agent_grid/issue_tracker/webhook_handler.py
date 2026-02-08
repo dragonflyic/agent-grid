@@ -6,8 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from ..execution_grid import event_bus, EventType
 from ..config import settings
+from ..execution_grid import EventType, event_bus
 
 webhook_router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 

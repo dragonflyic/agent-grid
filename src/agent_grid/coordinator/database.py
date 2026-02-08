@@ -6,9 +6,9 @@ from uuid import UUID
 
 import asyncpg
 
+from ..config import settings
 from ..execution_grid import AgentExecution, ExecutionStatus
 from .public_api import NudgeRequest, utc_now
-from ..config import settings
 
 
 class Database:
@@ -55,7 +55,8 @@ class Database:
         pool = await self._get_pool()
         await pool.execute(
             """
-            INSERT INTO executions (id, issue_id, repo_url, status, prompt, result, started_at, completed_at, created_at)
+            INSERT INTO executions
+            (id, issue_id, repo_url, status, prompt, result, started_at, completed_at, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
             execution.id,
@@ -243,7 +244,10 @@ class Database:
         """Get total budget usage."""
         pool = await self._get_pool()
 
-        query = "SELECT COALESCE(SUM(tokens_used), 0) as tokens, COALESCE(SUM(duration_seconds), 0) as duration FROM budget_usage"
+        query = (
+            "SELECT COALESCE(SUM(tokens_used), 0) as tokens,"
+            " COALESCE(SUM(duration_seconds), 0) as duration FROM budget_usage"
+        )
         params: list = []
 
         if since:
@@ -272,7 +276,9 @@ class Database:
         pool = await self._get_pool()
         await pool.execute(
             """
-            INSERT INTO issue_state (issue_number, repo, classification, parent_issue, sub_issues, retry_count, metadata, last_checked_at, updated_at)
+            INSERT INTO issue_state
+            (issue_number, repo, classification, parent_issue, sub_issues,
+             retry_count, metadata, last_checked_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
             ON CONFLICT (issue_number, repo) DO UPDATE SET
                 classification = COALESCE($3, issue_state.classification),
@@ -283,7 +289,12 @@ class Database:
                 last_checked_at = NOW(),
                 updated_at = NOW()
             """,
-            issue_number, repo, classification, parent_issue, sub_issues, retry_count,
+            issue_number,
+            repo,
+            classification,
+            parent_issue,
+            sub_issues,
+            retry_count,
             json.dumps(metadata) if metadata else None,
         )
 
@@ -292,7 +303,8 @@ class Database:
         pool = await self._get_pool()
         row = await pool.fetchrow(
             "SELECT * FROM issue_state WHERE issue_number = $1 AND repo = $2",
-            issue_number, repo,
+            issue_number,
+            repo,
         )
         return dict(row) if row else None
 
@@ -302,7 +314,8 @@ class Database:
         if classification:
             rows = await pool.fetch(
                 "SELECT * FROM issue_state WHERE repo = $1 AND classification = $2",
-                repo, classification,
+                repo,
+                classification,
             )
         else:
             rows = await pool.fetch(
@@ -318,7 +331,8 @@ class Database:
         pool = await self._get_pool()
         await pool.execute(
             "UPDATE executions SET checkpoint = $2 WHERE id = $1",
-            execution_id, json.dumps(checkpoint),
+            execution_id,
+            json.dumps(checkpoint),
         )
 
     async def get_latest_checkpoint(self, issue_id: str) -> dict | None:
@@ -368,7 +382,8 @@ class Database:
             INSERT INTO cron_state (key, value, updated_at) VALUES ($1, $2, NOW())
             ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
             """,
-            key, json.dumps(value),
+            key,
+            json.dumps(value),
         )
 
     # Execution updates for new columns
@@ -391,7 +406,11 @@ class Database:
                 checkpoint = $6, completed_at = NOW()
             WHERE id = $1
             """,
-            execution_id, status.value, result, pr_number, branch,
+            execution_id,
+            status.value,
+            result,
+            pr_number,
+            branch,
             json.dumps(checkpoint) if checkpoint else None,
         )
 

@@ -9,10 +9,9 @@ Also checks if all sub-issues of a parent are done, and closes the parent.
 
 import logging
 
-from ..config import settings
 from ..issue_tracker import get_issue_tracker
-from ..issue_tracker.public_api import IssueStatus
 from ..issue_tracker.label_manager import get_label_manager
+from ..issue_tracker.public_api import IssueStatus
 
 logger = logging.getLogger("agent_grid.dependency_resolver")
 
@@ -63,7 +62,8 @@ class DependencyResolver:
             all_done = all(sub.status == IssueStatus.CLOSED for sub in sub_issues)
             if all_done:
                 await self._tracker.add_comment(
-                    repo, parent.id,
+                    repo,
+                    parent.id,
                     "All sub-tasks completed! Closing parent issue.",
                 )
                 await self._tracker.update_issue_status(repo, parent.id, IssueStatus.CLOSED)

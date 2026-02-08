@@ -28,7 +28,7 @@ def build_prompt(
 ## Your Task
 Issue #{issue.number}: {issue.title}
 
-{issue.body or '(no description)'}
+{issue.body or "(no description)"}
 
 ## Rules
 1. Work ONLY on what the issue asks for. Do not refactor unrelated code.
@@ -56,7 +56,9 @@ Follow any auto-triggered skills (user-invocable: false) — they define the rep
 """
 
     if mode == "implement":
-        return base + f"""
+        return (
+            base
+            + f"""
 ## Setup
 Create and checkout a working branch:
 ```bash
@@ -68,13 +70,16 @@ After implementation:
 git push -u origin {branch_name}
 ```
 """
+        )
 
     elif mode == "address_review":
         pr_number = context.get("pr_number")
         existing_branch = context.get("existing_branch", branch_name)
         review_comments = context.get("review_comments", "")
 
-        prompt = base + f"""
+        prompt = (
+            base
+            + f"""
 ## IMPORTANT: You are addressing review feedback on PR #{pr_number}
 
 Previous work is already on branch: {existing_branch}
@@ -93,12 +98,13 @@ Do NOT force push. Do NOT squash. Add commits on top.
 git push origin {existing_branch}
 ```
 """
+        )
         if checkpoint:
             prompt += f"""
 ## Previous Context
 Here's what the previous agent run did, for your reference:
-- Decisions made: {checkpoint.get('decisions_made', 'N/A')}
-- Context: {checkpoint.get('context_summary', 'N/A')}
+- Decisions made: {checkpoint.get("decisions_made", "N/A")}
+- Context: {checkpoint.get("context_summary", "N/A")}
 """
         return prompt
 
@@ -108,7 +114,9 @@ Here's what the previous agent run did, for your reference:
         what_not_to_do = context.get("what_not_to_do", "")
         new_branch = f"agent/{issue.number}-retry"
 
-        prompt = base + f"""
+        prompt = (
+            base
+            + f"""
 ## IMPORTANT: A previous attempt was made and the PR was closed.
 
 Previous PR #{closed_pr_number} was closed by a human.
@@ -128,6 +136,7 @@ After implementation:
 git push -u origin {new_branch}
 ```
 """
+        )
         return prompt
 
     return base

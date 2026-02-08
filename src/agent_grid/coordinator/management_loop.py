@@ -17,15 +17,15 @@ from ..config import settings
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
 from ..issue_tracker.metadata import embed_metadata
-from .database import get_database
-from .scanner import get_scanner
-from .classifier import get_classifier
-from .planner import get_planner
-from .prompt_builder import build_prompt
-from .pr_monitor import get_pr_monitor
 from .blocker_resolver import get_blocker_resolver
-from .dependency_resolver import get_dependency_resolver
 from .budget_manager import get_budget_manager
+from .classifier import get_classifier
+from .database import get_database
+from .dependency_resolver import get_dependency_resolver
+from .planner import get_planner
+from .pr_monitor import get_pr_monitor
+from .prompt_builder import build_prompt
+from .scanner import get_scanner
 
 logger = logging.getLogger("agent_grid.cron")
 
@@ -116,7 +116,8 @@ class ManagementLoop:
             elif classification.category == "SKIP":
                 await labels.transition_to(repo, issue.id, "ai-skipped")
                 await self._tracker.add_comment(
-                    repo, issue.id,
+                    repo,
+                    issue.id,
                     f"Skipping automated work: {classification.reason}",
                 )
                 logger.info(f"Issue #{issue.number}: SKIPPED — {classification.reason}")
@@ -152,7 +153,7 @@ class ManagementLoop:
 
     async def _launch_simple(self, repo: str, issue) -> None:
         """Launch an agent for a SIMPLE issue."""
-        from ..execution_grid import get_execution_grid, ExecutionConfig
+        from ..execution_grid import ExecutionConfig, get_execution_grid
 
         labels = get_label_manager()
         await labels.transition_to(repo, issue.id, "ai-in-progress")
@@ -165,15 +166,18 @@ class ManagementLoop:
 
         grid = get_execution_grid()
         # Use the extended launch_agent if Fly grid (supports mode/issue_number)
-        if hasattr(grid, 'launch_agent') and 'mode' in grid.launch_agent.__code__.co_varnames:
+        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
             execution_id = await grid.launch_agent(
-                config, mode="implement", issue_number=issue.number,
+                config,
+                mode="implement",
+                issue_number=issue.number,
             )
         else:
             execution_id = await grid.launch_agent(config)
 
         # Record in DB
         from ..execution_grid import AgentExecution, ExecutionStatus
+
         execution = AgentExecution(
             id=execution_id,
             repo_url=config.repo_url,
@@ -185,7 +189,7 @@ class ManagementLoop:
 
     async def _launch_review_handler(self, repo: str, pr_info: dict) -> None:
         """Launch an agent to address PR review comments."""
-        from ..execution_grid import get_execution_grid, ExecutionConfig
+        from ..execution_grid import ExecutionConfig, get_execution_grid
 
         issue_id = pr_info["issue_id"]
         issue = await self._tracker.get_issue(repo, issue_id)
@@ -205,22 +209,25 @@ class ManagementLoop:
         )
 
         grid = get_execution_grid()
-        if hasattr(grid, 'launch_agent') and 'mode' in grid.launch_agent.__code__.co_varnames:
+        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
             execution_id = await grid.launch_agent(
-                config, mode="address_review", issue_number=int(issue_id),
+                config,
+                mode="address_review",
+                issue_number=int(issue_id),
                 context=context,
             )
         else:
             execution_id = await grid.launch_agent(config)
 
         from ..execution_grid import AgentExecution
+
         execution = AgentExecution(id=execution_id, repo_url=config.repo_url, prompt=prompt)
         await self._db.create_execution(execution, issue_id=issue_id)
         logger.info(f"PR #{pr_info['pr_number']}: launched review handler agent {execution_id}")
 
     async def _launch_retry(self, repo: str, pr_info: dict) -> None:
         """Launch a retry agent for a closed PR with feedback."""
-        from ..execution_grid import get_execution_grid, ExecutionConfig
+        from ..execution_grid import ExecutionConfig, get_execution_grid
 
         issue_id = pr_info["issue_id"]
         issue = await self._tracker.get_issue(repo, issue_id)
@@ -234,7 +241,8 @@ class ManagementLoop:
             labels = get_label_manager()
             await labels.transition_to(repo, issue_id, "ai-failed")
             await self._tracker.add_comment(
-                repo, issue_id,
+                repo,
+                issue_id,
                 f"Max retries ({settings.max_retries_per_issue}) reached. Needs human intervention.",
             )
             return
@@ -249,9 +257,11 @@ class ManagementLoop:
         config = ExecutionConfig(repo_url=f"https://github.com/{repo}.git", prompt=prompt)
 
         grid = get_execution_grid()
-        if hasattr(grid, 'launch_agent') and 'mode' in grid.launch_agent.__code__.co_varnames:
+        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
             execution_id = await grid.launch_agent(
-                config, mode="retry_with_feedback", issue_number=int(issue_id),
+                config,
+                mode="retry_with_feedback",
+                issue_number=int(issue_id),
                 context=context,
             )
         else:
@@ -259,7 +269,8 @@ class ManagementLoop:
 
         # Increment retry count
         await self._db.upsert_issue_state(
-            issue_number=int(issue_id), repo=repo,
+            issue_number=int(issue_id),
+            repo=repo,
             retry_count=retry_count + 1,
         )
 
@@ -267,6 +278,7 @@ class ManagementLoop:
         await labels.transition_to(repo, issue_id, "ai-in-progress")
 
         from ..execution_grid import AgentExecution
+
         execution = AgentExecution(id=execution_id, repo_url=config.repo_url, prompt=prompt)
         await self._db.create_execution(execution, issue_id=issue_id)
         logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent {execution_id}")
@@ -274,11 +286,13 @@ class ManagementLoop:
     async def _check_in_progress(self, repo: str) -> None:
         """Phase 4: Check in-progress executions for timeouts."""
         from ..execution_grid import ExecutionStatus
+
         running = await self._db.get_running_executions()
 
         for execution in running:
             if execution.started_at:
                 from datetime import datetime, timezone
+
                 elapsed = (datetime.now(timezone.utc) - execution.started_at).total_seconds()
                 if elapsed > settings.execution_timeout_seconds:
                     logger.warning(f"Execution {execution.id} timed out after {elapsed:.0f}s")

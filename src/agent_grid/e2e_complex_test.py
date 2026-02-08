@@ -23,7 +23,6 @@ import json
 import logging
 import os
 import sys
-import time
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,17 +51,17 @@ async def main():
         sys.exit(1)
 
     repo = settings.target_repo
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Complex Issue E2E Test: {repo}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # -- Install dry-run wrappers ------------------------------------------
     install_dry_run_wrappers()
 
-    from .coordinator.scanner import get_scanner
-    from .coordinator.classifier import get_classifier, Classification
+    from .coordinator.classifier import get_classifier
     from .coordinator.planner import get_planner
     from .coordinator.prompt_builder import build_prompt
+    from .coordinator.scanner import get_scanner
     from .issue_tracker import get_issue_tracker
 
     tracker = get_issue_tracker()
@@ -91,8 +90,7 @@ async def main():
             c = await classifier.classify(iss)
             classified.append((iss, c))
             sym = {"SIMPLE": "+", "COMPLEX": "*", "BLOCKED": "!", "SKIP": "-"}.get(c.category, "?")
-            print(f"  [{sym}] #{iss.number}: {c.category} "
-                  f"(complexity={c.estimated_complexity}) -- {c.reason}")
+            print(f"  [{sym}] #{iss.number}: {c.category} (complexity={c.estimated_complexity}) -- {c.reason}")
 
         # Pick the most complex COMPLEX issue
         complex_issues = [(iss, c) for iss, c in classified if c.category == "COMPLEX"]
@@ -104,13 +102,12 @@ async def main():
             complex_issues.sort(key=lambda x: x[1].estimated_complexity, reverse=True)
             issue, cl = complex_issues[0]
 
-        print(f"\n  Selected most complex: #{issue.number} "
-              f"(complexity={cl.estimated_complexity})")
+        print(f"\n  Selected most complex: #{issue.number} (complexity={cl.estimated_complexity})")
 
     # -- Show issue details ------------------------------------------------
-    print(f"\n{'~'*60}")
+    print(f"\n{'~' * 60}")
     print(f"  Issue #{issue.number}: {issue.title}")
-    print(f"{'~'*60}")
+    print(f"{'~' * 60}")
     if issue.body:
         preview = issue.body[:600] + ("..." if len(issue.body) > 600 else "")
         print(f"\n{preview}\n")
@@ -124,13 +121,15 @@ async def main():
         print(f"  Complexity: {classification.estimated_complexity}")
         print(f"  Reason: {classification.reason}")
         if classification.category != "COMPLEX":
-            print(f"\n  Note: Issue classified as {classification.category}, "
-                  f"not COMPLEX. Running planner anyway for testing.\n")
+            print(
+                f"\n  Note: Issue classified as {classification.category}, "
+                f"not COMPLEX. Running planner anyway for testing.\n"
+            )
 
     # -- Phase 4: Run planner to decompose --------------------------------
-    print(f"\n{'~'*60}")
-    print(f"  Phase 3: Running Planner (decomposing into sub-tasks)...")
-    print(f"{'~'*60}\n")
+    print(f"\n{'~' * 60}")
+    print("  Phase 3: Running Planner (decomposing into sub-tasks)...")
+    print(f"{'~' * 60}\n")
 
     planner = get_planner()
     created_issues = await planner.decompose(
@@ -142,13 +141,14 @@ async def main():
 
     # -- Phase 5: Show what prompts would be generated --------------------
     if created_issues:
-        print(f"\n{'~'*60}")
-        print(f"  Phase 4: Generated prompts for each sub-task")
-        print(f"{'~'*60}\n")
+        print(f"\n{'~' * 60}")
+        print("  Phase 4: Generated prompts for each sub-task")
+        print(f"{'~' * 60}\n")
 
         for ci in created_issues:
             # Build a fake IssueInfo for the sub-issue to generate its prompt
             from .issue_tracker.public_api import IssueInfo, IssueStatus
+
             sub_issue = IssueInfo(
                 id=str(ci["number"]),
                 number=ci["number"],
@@ -164,9 +164,9 @@ async def main():
             print(f"    Prompt length: {len(prompt)} chars")
 
     # -- Phase 6: Show dry-run log -----------------------------------------
-    print(f"\n{'='*60}")
-    print(f"  Results")
-    print(f"{'='*60}\n")
+    print(f"\n{'=' * 60}")
+    print("  Results")
+    print(f"{'=' * 60}\n")
 
     print(f"  Parent issue: #{issue.number} -- {issue.title}")
     print(f"  Sub-tasks created: {len(created_issues)}")
@@ -175,13 +175,14 @@ async def main():
 
     # Read and display dry-run log
     from pathlib import Path
+
     dry_run_path = Path(settings.dry_run_output_file).resolve()
     print(f"\n  Dry-run log: {dry_run_path}")
 
     if dry_run_path.exists():
-        print(f"\n{'~'*60}")
-        print(f"  All intercepted write operations:")
-        print(f"{'~'*60}\n")
+        print(f"\n{'~' * 60}")
+        print("  All intercepted write operations:")
+        print(f"{'~' * 60}\n")
         for line in dry_run_path.read_text().strip().split("\n"):
             if line:
                 entry = json.loads(line)
@@ -207,15 +208,14 @@ async def main():
                 elif action == "remove_label":
                     print(f"  [LABEL-] Issue #{entry.get('issue_id')} - {entry.get('label')}")
                 elif action == "launch_agent":
-                    print(f"  [AGENT] Launch for issue #{entry.get('issue_number')} "
-                          f"(mode={entry.get('mode')})")
+                    print(f"  [AGENT] Launch for issue #{entry.get('issue_number')} (mode={entry.get('mode')})")
                     print(f"          Prompt: {entry.get('prompt_preview', '')[:200]}...")
                     print()
                 else:
                     print(f"  [{action}] {json.dumps(entry, default=str)[:200]}")
 
     await tracker.close()
-    print(f"\nDone. Nothing was written to GitHub.")
+    print("\nDone. Nothing was written to GitHub.")
     print(f"All operations logged to: {dry_run_path}")
 
 

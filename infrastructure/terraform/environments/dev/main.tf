@@ -129,14 +129,16 @@ module "database" {
 module "secrets" {
   source = "../../modules/secrets"
 
-  project_name      = var.project_name
-  database_username = "agentgrid"
-  database_password = var.database_password
-  database_host     = module.database.address
-  database_port     = module.database.port
-  database_name     = module.database.database_name
-  github_token      = var.github_token
+  project_name          = var.project_name
+  database_username     = "agentgrid"
+  database_password     = var.database_password
+  database_host         = module.database.address
+  database_port         = module.database.port
+  database_name         = module.database.database_name
+  github_token          = var.github_token
   github_webhook_secret = var.github_webhook_secret
+  fly_api_token         = var.fly_api_token
+  anthropic_api_key     = var.anthropic_api_key
 
   tags = local.tags
 }
@@ -171,6 +173,47 @@ module "apprunner" {
     var.github_token != "" ? {
       AGENT_GRID_GITHUB_TOKEN        = "${module.secrets.github_secret_arn}:token::"
       AGENT_GRID_GITHUB_WEBHOOK_SECRET = "${module.secrets.github_secret_arn}:webhook_secret::"
+    } : {}
+  )
+
+  tags = local.tags
+}
+
+# ECS Scheduled Task (coordinator runs on schedule)
+module "ecs_scheduled_task" {
+  source = "../../modules/ecs-scheduled-task"
+
+  project_name     = var.project_name
+  aws_region       = var.aws_region
+  ecr_image_uri    = "${module.apprunner.ecr_repository_url}:latest"
+  cpu              = "512"
+  memory           = "1024"
+  schedule_minutes = 30
+
+  subnet_ids         = module.networking.private_subnet_ids
+  security_group_ids = [aws_security_group.apprunner_private.id]
+  secret_arns        = module.secrets.all_secret_arns
+
+  environment_variables = {
+    AGENT_GRID_DEPLOYMENT_MODE    = "coordinator"
+    AGENT_GRID_ISSUE_TRACKER_TYPE = "github"
+    AGENT_GRID_TARGET_REPO        = var.target_repo
+    AGENT_GRID_FLY_APP_NAME       = var.fly_app_name
+    AGENT_GRID_FLY_WORKER_IMAGE   = var.fly_worker_image
+    PYTHONPATH                    = "/app/src"
+    PYTHONUNBUFFERED               = "1"
+  }
+
+  environment_secrets = merge(
+    {
+      AGENT_GRID_DATABASE_URL = "${module.secrets.database_secret_arn}:connection_string::"
+    },
+    var.github_token != "" ? {
+      AGENT_GRID_GITHUB_TOKEN = "${module.secrets.github_secret_arn}:token::"
+    } : {},
+    module.secrets.coordinator_secret_arn != "" ? {
+      AGENT_GRID_FLY_API_TOKEN     = "${module.secrets.coordinator_secret_arn}:fly_api_token::"
+      AGENT_GRID_ANTHROPIC_API_KEY = "${module.secrets.coordinator_secret_arn}:anthropic_api_key::"
     } : {}
   )
 

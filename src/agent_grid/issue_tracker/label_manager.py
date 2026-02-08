@@ -37,7 +37,7 @@ class LabelManager:
     async def transition_to(self, repo: str, issue_id: str, new_label: str) -> None:
         """Remove all ai-* labels and add the new one."""
         issue = await self._github.get_issue(repo, issue_id)
-        current_ai_labels = [l for l in issue.labels if l in AI_LABELS]
+        current_ai_labels = [label for label in issue.labels if label in AI_LABELS]
 
         for label in current_ai_labels:
             if label != new_label:

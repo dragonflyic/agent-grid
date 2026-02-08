@@ -1,10 +1,10 @@
 """In-memory SQS-compatible event bus."""
 
 import asyncio
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
-from .public_api import Event, EventType, utc_now
 from ..config import settings
+from .public_api import Event, EventType, utc_now
 
 
 class EventBus:
@@ -15,9 +15,7 @@ class EventBus:
     """
 
     def __init__(self, max_size: int | None = None):
-        self._queue: asyncio.Queue[Event] = asyncio.Queue(
-            maxsize=max_size or settings.event_bus_max_size
-        )
+        self._queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=max_size or settings.event_bus_max_size)
         self._subscribers: dict[EventType | None, list[Callable[[Event], Awaitable[None]]]] = {}
         self._running = False
         self._consumer_task: asyncio.Task | None = None
@@ -54,9 +52,7 @@ class EventBus:
     ) -> None:
         """Unsubscribe from events."""
         if event_type in self._subscribers:
-            self._subscribers[event_type] = [
-                h for h in self._subscribers[event_type] if h != handler
-            ]
+            self._subscribers[event_type] = [h for h in self._subscribers[event_type] if h != handler]
 
     async def _dispatch(self, event: Event) -> None:
         """Dispatch an event to all matching subscribers."""

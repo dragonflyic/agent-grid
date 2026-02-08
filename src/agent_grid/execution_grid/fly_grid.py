@@ -6,12 +6,14 @@ Results come back via HTTP callback to /api/agent-status.
 
 import json
 import logging
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 from uuid import UUID, uuid4
 
+from ..fly import get_fly_client
+from .event_bus import event_bus
 from .public_api import (
-    AgentExecution,
     AgentEventHandler,
+    AgentExecution,
     Event,
     EventType,
     ExecutionConfig,
@@ -19,9 +21,6 @@ from .public_api import (
     ExecutionStatus,
     utc_now,
 )
-from .event_bus import event_bus
-from ..config import settings
-from ..fly import get_fly_client
 
 logger = logging.getLogger("agent_grid.fly_grid")
 
@@ -166,6 +165,7 @@ class FlyExecutionGrid(ExecutionGrid):
     def subscribe_to_agent_events(self, handler: AgentEventHandler) -> None:
         async def event_handler(event: Event) -> None:
             await handler(event.type.value, event.payload)
+
         self._handler_mapping[id(handler)] = event_handler
         event_bus.subscribe(event_handler, event_type=None)
 

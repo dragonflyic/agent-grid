@@ -3,19 +3,17 @@
 import asyncio
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 
-from agent_grid.execution_grid import event_bus, EventType, ExecutionStatus
-from agent_grid.issue_tracker import IssueStatus
-from agent_grid.coordinator.database import Database
-from agent_grid.coordinator.scheduler import Scheduler
-from agent_grid.coordinator.nudge_handler import NudgeHandler
 from agent_grid.coordinator.budget_manager import BudgetManager
+from agent_grid.coordinator.nudge_handler import NudgeHandler
+from agent_grid.execution_grid import EventType, ExecutionStatus
 from agent_grid.execution_grid.agent_runner import AgentRunner
 from agent_grid.execution_grid.repo_manager import RepoManager
+from agent_grid.issue_tracker import IssueStatus
 from agent_grid.issue_tracker.filesystem_client import FilesystemClient
 
 
@@ -127,6 +125,7 @@ class TestEndToEnd:
 
         # Track events received using a fresh event bus
         from agent_grid.execution_grid import EventBus
+
         test_event_bus = EventBus()
         events_received = []
 
@@ -149,6 +148,7 @@ class TestEndToEnd:
 
                 # Yield a mock result message
                 from claude_code_sdk.types import ResultMessage
+
                 yield ResultMessage(
                     subtype="success",
                     duration_ms=100,
@@ -178,6 +178,7 @@ class TestEndToEnd:
 
             # Create execution config and record
             from agent_grid.execution_grid import AgentExecution, ExecutionConfig
+
             prompt = f"Issue: {issue.title}\n\n{issue.body}"
             config = ExecutionConfig(
                 repo_url="file:///tmp/test-repo",
@@ -192,8 +193,10 @@ class TestEndToEnd:
             )
 
             # Run with mocked SDK and patched event bus
-            with patch("agent_grid.execution_grid.agent_runner.query", mock_query), \
-                 patch("agent_grid.execution_grid.event_publisher.event_bus", test_event_bus):
+            with (
+                patch("agent_grid.execution_grid.agent_runner.query", mock_query),
+                patch("agent_grid.execution_grid.event_publisher.event_bus", test_event_bus),
+            ):
                 result = await agent_runner.run(execution, config)
 
             # Step 4: Verify results

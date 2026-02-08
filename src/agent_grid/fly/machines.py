@@ -83,8 +83,7 @@ class FlyMachinesClient:
 
         machine = response.json()
         logger.info(
-            f"Spawned Fly Machine {machine['id']} for issue #{issue_number} "
-            f"(execution={execution_id}, mode={mode})"
+            f"Spawned Fly Machine {machine['id']} for issue #{issue_number} (execution={execution_id}, mode={mode})"
         )
         return machine
 

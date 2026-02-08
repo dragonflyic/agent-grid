@@ -7,9 +7,7 @@ spawns a new agent to address the feedback on the existing branch.
 import logging
 from datetime import datetime
 
-from ..config import settings
 from ..issue_tracker import get_issue_tracker
-from ..issue_tracker.public_api import IssueInfo
 from .database import get_database
 
 logger = logging.getLogger("agent_grid.pr_monitor")
@@ -29,6 +27,7 @@ class PRMonitor:
         [{"pr_number": N, "issue_id": "...", "review_comments": "...", "branch": "..."}]
         """
         from ..issue_tracker.github_client import GitHubClient
+
         if not isinstance(self._tracker, GitHubClient):
             return []
 
@@ -100,12 +99,14 @@ class PRMonitor:
                 pr_body = pr.get("body", "") or ""
                 issue_id = self._extract_issue_number(pr_body)
 
-                prs_needing_attention.append({
-                    "pr_number": pr_number,
-                    "issue_id": issue_id,
-                    "review_comments": all_feedback,
-                    "branch": head_branch,
-                })
+                prs_needing_attention.append(
+                    {
+                        "pr_number": pr_number,
+                        "issue_id": issue_id,
+                        "review_comments": all_feedback,
+                        "branch": head_branch,
+                    }
+                )
 
         # Update last check timestamp
         await self._db.set_cron_state(
@@ -121,6 +122,7 @@ class PRMonitor:
         Returns list of closed PRs with human feedback.
         """
         from ..issue_tracker.github_client import GitHubClient
+
         if not isinstance(self._tracker, GitHubClient):
             return []
 
@@ -172,12 +174,14 @@ class PRMonitor:
             pr_body = pr.get("body", "") or ""
             issue_id = self._extract_issue_number(pr_body)
 
-            prs_with_feedback.append({
-                "pr_number": pr_number,
-                "issue_id": issue_id,
-                "human_feedback": "\n\n".join(feedback),
-                "branch": head_branch,
-            })
+            prs_with_feedback.append(
+                {
+                    "pr_number": pr_number,
+                    "issue_id": issue_id,
+                    "human_feedback": "\n\n".join(feedback),
+                    "branch": head_branch,
+                }
+            )
 
         await self._db.set_cron_state(
             "last_closed_pr_check",
@@ -189,6 +193,7 @@ class PRMonitor:
     def _extract_issue_number(self, pr_body: str) -> str | None:
         """Extract linked issue number from PR body (Closes #N)."""
         import re
+
         match = re.search(r"(?:Closes|Fixes|Resolves)\s+#(\d+)", pr_body, re.IGNORECASE)
         return match.group(1) if match else None
 

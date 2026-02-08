@@ -1,10 +1,8 @@
 """Tests for coordinator module."""
 
-import pytest
 from uuid import uuid4
 
 from agent_grid.coordinator import NudgeRequest
-from agent_grid.execution_grid import AgentExecution, ExecutionStatus
 
 
 class TestNudgeRequest:
@@ -38,6 +36,7 @@ class TestBudgetManager:
     def test_max_concurrent_default(self):
         """Test default max concurrent is set."""
         from agent_grid.config import settings
+
         assert settings.max_concurrent_executions > 0
 
 
@@ -66,12 +65,8 @@ class TestScheduler:
         from agent_grid.coordinator.scheduler import Scheduler
 
         scheduler = Scheduler()
-        assert scheduler._extract_repo_from_url(
-            "https://github.com/owner/repo.git"
-        ) == "owner/repo"
-        assert scheduler._extract_repo_from_url(
-            "https://github.com/owner/repo"
-        ) == "owner/repo"
+        assert scheduler._extract_repo_from_url("https://github.com/owner/repo.git") == "owner/repo"
+        assert scheduler._extract_repo_from_url("https://github.com/owner/repo") == "owner/repo"
 
     def test_generate_prompt(self):
         """Test prompt generation."""

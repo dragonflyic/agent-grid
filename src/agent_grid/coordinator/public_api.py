@@ -13,10 +13,10 @@ from pydantic import BaseModel, Field
 
 from ..execution_grid import AgentExecution, ExecutionStatus
 
-
 # =============================================================================
 # Utilities
 # =============================================================================
+
 
 def utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
@@ -26,6 +26,7 @@ def utc_now() -> datetime:
 # =============================================================================
 # Models
 # =============================================================================
+
 
 class NudgeRequest(BaseModel):
     """A request from an agent to nudge another issue/agent."""
@@ -82,6 +83,7 @@ async def list_executions(
         List of matching executions.
     """
     from .database import get_database
+
     db = get_database()
     return await db.list_executions(
         status=status,
@@ -106,6 +108,7 @@ async def get_execution(execution_id: UUID) -> AgentExecution:
         HTTPException: If execution not found.
     """
     from .database import get_database
+
     db = get_database()
     execution = await db.get_execution(execution_id)
     if not execution:
@@ -127,6 +130,7 @@ async def create_nudge(request: NudgeRequestCreate) -> NudgeRequest:
         The created nudge request.
     """
     from .nudge_handler import get_nudge_handler
+
     handler = get_nudge_handler()
     return await handler.handle_nudge(
         issue_id=request.issue_id,
@@ -149,6 +153,7 @@ async def list_pending_nudges(limit: int = 10) -> list[NudgeRequest]:
         List of pending nudge requests.
     """
     from .nudge_handler import get_nudge_handler
+
     handler = get_nudge_handler()
     return await handler.get_pending_nudges(limit)
 
@@ -168,6 +173,7 @@ class AgentStatusCallback(BaseModel):
 async def agent_status_callback(body: AgentStatusCallback) -> dict[str, str]:
     """Callback endpoint for Fly Machine workers to report results."""
     from ..execution_grid.fly_grid import get_fly_execution_grid
+
     grid = get_fly_execution_grid()
     await grid.handle_agent_result(
         execution_id=UUID(body.execution_id),
@@ -189,5 +195,6 @@ async def get_budget_status() -> dict[str, Any]:
         Budget status including concurrent executions and resource usage.
     """
     from .budget_manager import get_budget_manager
+
     manager = get_budget_manager()
     return await manager.get_budget_status()

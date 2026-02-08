@@ -7,15 +7,15 @@ Implementation modules import from here, not the other way around.
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-
 # =============================================================================
 # Utilities
 # =============================================================================
+
 
 def utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
@@ -25,6 +25,7 @@ def utc_now() -> datetime:
 # =============================================================================
 # Models
 # =============================================================================
+
 
 class ExecutionConfig(BaseModel):
     """Configuration for a generic agent execution."""
@@ -90,6 +91,7 @@ AgentEventHandler = Callable[[str, dict], Awaitable[None]]
 # =============================================================================
 # Service Interface (ABC)
 # =============================================================================
+
 
 class ExecutionGrid(ABC):
     """Abstract interface for the execution grid service."""

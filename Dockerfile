@@ -44,9 +44,9 @@ COPY src/ ./src/
 # Copy alembic configuration
 COPY alembic.ini ./
 
-# Copy startup script
-COPY scripts/start.sh ./
-RUN chmod +x start.sh
+# Copy startup scripts
+COPY scripts/ ./scripts/
+RUN chmod +x scripts/*.sh
 
 # Set ownership
 RUN chown -R appuser:appuser /app
@@ -68,4 +68,4 @@ EXPOSE 8000
 # Do not use Docker HEALTHCHECK as it may conflict with App Runner's health checks
 
 # Run the application (runs migrations first, then starts uvicorn)
-CMD ["./start.sh"]
+CMD ["./scripts/start.sh"]

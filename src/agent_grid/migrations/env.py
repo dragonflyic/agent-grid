@@ -24,12 +24,10 @@ def get_database_url() -> str:
     # Fall back to settings
     try:
         from agent_grid.config import settings
+
         return settings.database_url
     except ImportError:
-        raise RuntimeError(
-            "Could not determine database URL. "
-            "Set AGENT_GRID_DATABASE_URL environment variable."
-        )
+        raise RuntimeError("Could not determine database URL. Set AGENT_GRID_DATABASE_URL environment variable.")
 
 
 def run_migrations_offline() -> None:

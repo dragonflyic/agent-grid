@@ -35,3 +35,35 @@ variable "github_org" {
   type        = string
   default     = ""
 }
+
+variable "fly_api_token" {
+  description = "Fly.io API token for spawning worker machines"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "anthropic_api_key" {
+  description = "Anthropic API key for classification and planning"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "target_repo" {
+  description = "GitHub repository to monitor (owner/repo)"
+  type        = string
+  default     = ""
+}
+
+variable "fly_app_name" {
+  description = "Fly.io app name for worker machines"
+  type        = string
+  default     = "agent-grid-workers"
+}
+
+variable "fly_worker_image" {
+  description = "Docker image for Fly.io worker machines"
+  type        = string
+  default     = "registry.fly.io/agent-grid-workers:latest"
+}

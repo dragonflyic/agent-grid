@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     management_loop_interval_seconds: int = 3600  # 1 hour
 
     # Agent execution
-    agent_bypass_permissions: bool = True  # Use bypassPermissions mode for autonomous agents (required for non-interactive execution)
+    agent_bypass_permissions: bool = (
+        True  # Use bypassPermissions mode for autonomous agents (required for non-interactive execution)
+    )
 
     # Testing overrides (for development/testing only)
     test_force_planning_only: bool = False  # Force agents to only create subissues, not write code

@@ -11,15 +11,14 @@ pipeline. The scheduler focuses on real-time event-driven reactions:
 import logging
 from uuid import UUID
 
-from ..config import settings
 from ..execution_grid import (
-    event_bus,
-    get_execution_grid,
     AgentExecution,
     Event,
     EventType,
     ExecutionConfig,
     ExecutionStatus,
+    event_bus,
+    get_execution_grid,
 )
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
@@ -188,9 +187,11 @@ class Scheduler:
         )
 
         grid = get_execution_grid()
-        if hasattr(grid, 'launch_agent') and 'mode' in grid.launch_agent.__code__.co_varnames:
+        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
             execution_id = await grid.launch_agent(
-                config, mode="implement", issue_number=issue.number,
+                config,
+                mode="implement",
+                issue_number=issue.number,
             )
         else:
             execution_id = await grid.launch_agent(config)
