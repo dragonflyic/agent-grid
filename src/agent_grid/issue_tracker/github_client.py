@@ -121,21 +121,33 @@ class GitHubClient(IssueTracker):
         if labels:
             params["labels"] = ",".join(labels)
 
-        response = await self._client.get(f"/repos/{repo}/issues", params=params)
-        response.raise_for_status()
-
         issues = []
-        for data in response.json():
-            # Skip pull requests (GitHub API returns them with issues)
-            if "pull_request" in data:
-                continue
-            issue = self._parse_issue(repo, data)
+        page = 1
 
-            # Additional filter for in-progress status
-            if status == IssueStatus.IN_PROGRESS and issue.status != IssueStatus.IN_PROGRESS:
-                continue
+        while True:
+            params["page"] = page
+            response = await self._client.get(f"/repos/{repo}/issues", params=params)
+            response.raise_for_status()
+            data = response.json()
 
-            issues.append(issue)
+            if not data:
+                break
+
+            for item in data:
+                # Skip pull requests (GitHub API returns them with issues)
+                if "pull_request" in item:
+                    continue
+                issue = self._parse_issue(repo, item)
+
+                # Additional filter for in-progress status
+                if status == IssueStatus.IN_PROGRESS and issue.status != IssueStatus.IN_PROGRESS:
+                    continue
+
+                issues.append(issue)
+
+            if len(data) < 100:
+                break
+            page += 1
 
         return issues
 
