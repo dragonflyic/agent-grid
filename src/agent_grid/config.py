@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     max_cost_per_day_usd: float = 50.0
     max_retries_per_issue: int = 2
 
+    # Dry run mode — reads from GitHub but logs all writes to file instead
+    dry_run: bool = False
+    dry_run_output_file: str = "dry_run_output.jsonl"
+
     # Deployment mode
     deployment_mode: Literal["local", "coordinator"] = "local"
 
