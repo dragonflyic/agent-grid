@@ -1,5 +1,5 @@
 output "coordinator_url" {
-  description = "Coordinator service URL"
+  description = "URL of the coordinator service"
   value       = "https://${module.apprunner.service_url}"
 }
 
