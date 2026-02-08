@@ -17,33 +17,21 @@ logger = logging.getLogger("agent_grid.scheduled_task")
 
 
 async def main() -> int:
-    from .config import settings
+    from .coordinator.database import get_database
     from .coordinator.management_loop import ManagementLoop
-
-    is_dry_run = settings.dry_run
-
-    if is_dry_run:
-        logger.info("DRY RUN MODE — reads from GitHub, all writes logged only")
-        from .dry_run import install_dry_run_wrappers
-
-        install_dry_run_wrappers()
 
     logger.info("Starting scheduled coordinator cycle...")
 
-    if not is_dry_run:
-        # Real mode: connect DB, acquire advisory lock
-        from .coordinator.database import get_database
+    db = get_database()
+    await db.connect()
+    logger.info("Database connected")
 
-        db = get_database()
-        await db.connect()
-        logger.info("Database connected")
-
-        pool = db._pool
-        async with pool.acquire() as conn:
-            acquired = await conn.fetchval("SELECT pg_try_advisory_lock(42)")
-            if not acquired:
-                logger.info("Another cycle is already running, exiting")
-                return 0
+    pool = db._pool
+    async with pool.acquire() as conn:
+        acquired = await conn.fetchval("SELECT pg_try_advisory_lock(42)")
+        if not acquired:
+            logger.info("Another cycle is already running, exiting")
+            return 0
 
     try:
         loop = ManagementLoop()
@@ -54,22 +42,17 @@ async def main() -> int:
         logger.exception("Scheduled cycle failed")
         return 1
     finally:
-        if not is_dry_run:
-            # Release advisory lock and clean up real connections
-            async with pool.acquire() as conn:
-                await conn.execute("SELECT pg_advisory_unlock(42)")
+        async with pool.acquire() as conn:
+            await conn.execute("SELECT pg_advisory_unlock(42)")
 
-            from .fly.machines import get_fly_client
+        from .fly.machines import get_fly_client
 
-            try:
-                fly_client = get_fly_client()
-                await fly_client.close()
-            except Exception:
-                pass
+        try:
+            fly_client = get_fly_client()
+            await fly_client.close()
+        except Exception:
+            pass
 
-            await db.close()
-
-        # Always close the issue tracker (real HTTP client in both modes)
         from .issue_tracker import get_issue_tracker
 
         try:
@@ -78,6 +61,7 @@ async def main() -> int:
         except Exception:
             pass
 
+        await db.close()
         logger.info("Cleanup complete")
 
 
