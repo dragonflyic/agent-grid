@@ -8,27 +8,6 @@ output "ecr_repository_url" {
   value       = module.apprunner.ecr_repository_url
 }
 
-output "jobs_queue_url" {
-  description = "SQS jobs queue URL (for local worker config)"
-  value       = module.queues.jobs_queue_url
-}
-
-output "results_queue_url" {
-  description = "SQS results queue URL (for local worker config)"
-  value       = module.queues.results_queue_url
-}
-
-output "worker_access_key_id" {
-  description = "AWS access key ID for local worker"
-  value       = module.queues.worker_access_key_id
-}
-
-output "worker_secret_access_key" {
-  description = "AWS secret access key for local worker"
-  value       = module.queues.worker_secret_access_key
-  sensitive   = true
-}
-
 output "database_endpoint" {
   description = "RDS database endpoint"
   value       = module.database.endpoint
@@ -42,4 +21,19 @@ output "github_webhook_url" {
 output "github_org" {
   description = "GitHub organization with webhook configured"
   value       = var.github_org
+}
+
+output "ecs_cluster_arn" {
+  description = "ARN of the ECS cluster for scheduled tasks"
+  value       = module.ecs_scheduled_task.cluster_arn
+}
+
+output "ecs_log_group_name" {
+  description = "CloudWatch log group for coordinator scheduled tasks"
+  value       = module.ecs_scheduled_task.log_group_name
+}
+
+output "schedule_rule_arn" {
+  description = "EventBridge schedule rule ARN"
+  value       = module.ecs_scheduled_task.schedule_rule_arn
 }

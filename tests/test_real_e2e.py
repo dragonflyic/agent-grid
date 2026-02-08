@@ -8,7 +8,6 @@ This test requires:
 Run with: pytest tests/test_real_e2e.py -v -s
 """
 
-import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -16,11 +15,10 @@ from pathlib import Path
 import pytest
 
 from agent_grid.execution_grid import AgentExecution, ExecutionStatus
-from agent_grid.issue_tracker import IssueStatus
 from agent_grid.execution_grid.agent_runner import AgentRunner
 from agent_grid.execution_grid.repo_manager import RepoManager
+from agent_grid.issue_tracker import IssueStatus
 from agent_grid.issue_tracker.github_client import GitHubClient
-
 
 # Test configuration
 TEST_REPO = "dragonflyic/agent-grid"
@@ -73,7 +71,8 @@ class TestRealEndToEnd:
 
 Your task is simple: respond to this ping by outputting the word "pong".
 
-You do not need to modify any files or make any commits. Just acknowledge this message by saying "pong" in your response.
+You do not need to modify any files or make any commits.
+Just acknowledge this message by saying "pong" in your response.
 
 This issue will be automatically closed after the test completes.""",
                 labels=["test", "automated"],
@@ -102,7 +101,8 @@ Issue Title: {issue.title}
 Issue Body:
 {issue.body}
 
-Please respond to this ping by outputting "pong". You do not need to modify any files or make commits - just acknowledge the ping with a pong response.""",
+Please respond to this ping by outputting "pong".
+You do not need to modify any files or make commits - just acknowledge the ping with a pong response.""",
             )
 
             print(f"Execution ID: {execution.id}")
@@ -130,15 +130,9 @@ Please respond to this ping by outputting "pong". You do not need to modify any 
                 print(f"\n=== Cleanup: Closing issue #{issue.id} ===")
                 try:
                     await github_client.add_comment(
-                        TEST_REPO,
-                        issue.id,
-                        "✅ Test completed successfully. Closing issue."
+                        TEST_REPO, issue.id, "✅ Test completed successfully. Closing issue."
                     )
-                    await github_client.update_issue_status(
-                        TEST_REPO,
-                        issue.id,
-                        IssueStatus.CLOSED
-                    )
+                    await github_client.update_issue_status(TEST_REPO, issue.id, IssueStatus.CLOSED)
                     print(f"Issue #{issue.id} closed")
                 except Exception as e:
                     print(f"Warning: Failed to close issue: {e}")
@@ -182,9 +176,9 @@ This issue will be automatically closed after the test completes.""",
             agent_runner._repo_manager = repo_manager
 
             # Patch push to be a no-op (we don't want to actually push)
-            original_push = repo_manager.push_branch
             async def mock_push(execution_id, branch_name):
                 print(f"(Skipping push for branch {branch_name})")
+
             repo_manager.push_branch = mock_push
 
             # Step 3: Create execution and run agent
@@ -241,16 +235,8 @@ Do not commit or push - just create the file.""",
             if issue:
                 print(f"\n=== Cleanup: Closing issue #{issue.id} ===")
                 try:
-                    await github_client.add_comment(
-                        TEST_REPO,
-                        issue.id,
-                        "✅ Test completed. Closing issue."
-                    )
-                    await github_client.update_issue_status(
-                        TEST_REPO,
-                        issue.id,
-                        IssueStatus.CLOSED
-                    )
+                    await github_client.add_comment(TEST_REPO, issue.id, "✅ Test completed. Closing issue.")
+                    await github_client.update_issue_status(TEST_REPO, issue.id, IssueStatus.CLOSED)
                 except Exception as e:
                     print(f"Warning: Failed to close issue: {e}")
             await github_client.close()
@@ -285,7 +271,6 @@ class TestCoordinatorIntegration:
 
             # Set up coordinator components with mocked database
             from agent_grid.coordinator.nudge_handler import NudgeHandler
-            from agent_grid.coordinator.scheduler import Scheduler
             from tests.test_e2e import MockDatabase
 
             mock_db = MockDatabase()
@@ -318,9 +303,11 @@ class TestCoordinatorIntegration:
             # Skip push
             async def mock_push(execution_id, branch_name):
                 pass
+
             repo_manager.push_branch = mock_push
 
             from uuid import uuid4
+
             execution = AgentExecution(
                 id=uuid4(),
                 issue_id=issue.id,

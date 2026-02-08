@@ -55,9 +55,10 @@ class TestWebhookHandler:
 
     def test_verify_signature_valid(self):
         """Test signature verification with valid signature."""
-        from agent_grid.issue_tracker.webhook_handler import verify_signature
         import hashlib
         import hmac
+
+        from agent_grid.issue_tracker.webhook_handler import verify_signature
 
         secret = "test_secret"
         payload = b'{"test": "data"}'

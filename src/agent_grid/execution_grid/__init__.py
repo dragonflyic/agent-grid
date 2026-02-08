@@ -1,22 +1,21 @@
 """Execution grid module for launching and managing coding agents."""
 
+from .event_bus import EventBus, event_bus
+from .fly_grid import FlyExecutionGrid, get_fly_execution_grid
 from .public_api import (
+    # Type aliases
+    AgentEventHandler,
     # Models
     AgentExecution,
     Event,
     EventType,
     ExecutionConfig,
-    ExecutionStatus,
-    utc_now,
-    # Type aliases
-    AgentEventHandler,
     # ABC interface
     ExecutionGrid,
+    ExecutionStatus,
+    utc_now,
 )
-from .service import get_execution_grid, ExecutionGridService
-from .event_bus import EventBus, event_bus
-from .sqs_client import SQSClient, get_sqs_client, JobRequest, JobResult
-from .sqs_grid import ExecutionGridClient, get_sqs_execution_grid
+from .service import ExecutionGridService, get_execution_grid
 
 __all__ = [
     # Public API - Models
@@ -35,12 +34,7 @@ __all__ = [
     # Event bus (for startup/shutdown)
     "EventBus",
     "event_bus",
-    # SQS client (for hybrid deployment)
-    "SQSClient",
-    "get_sqs_client",
-    "JobRequest",
-    "JobResult",
-    # SQS-based execution grid (coordinator mode)
-    "ExecutionGridClient",
-    "get_sqs_execution_grid",
+    # Fly Machines-based execution grid (coordinator mode)
+    "FlyExecutionGrid",
+    "get_fly_execution_grid",
 ]

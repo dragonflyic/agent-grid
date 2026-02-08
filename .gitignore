@@ -44,6 +44,7 @@ htmlcov/
 .env
 .env.local
 .env.worker
+!.env.example
 
 # OS
 .DS_Store
@@ -53,6 +54,8 @@ Thumbs.db
 issues/
 /tmp/
 *.log
+dry_run_output.jsonl
+e2e_output.log
 
 # Terraform
 *.tfstate

@@ -1,8 +1,7 @@
 """Filesystem-based issue tracker using markdown files."""
 
-import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -159,11 +158,13 @@ class FilesystemClient(IssueTracker):
         if issue.comments:
             parts.extend(["", "## Comments", ""])
             for comment in issue.comments:
-                parts.extend([
-                    f"### {comment.created_at.isoformat()}",
-                    comment.body,
-                    "",
-                ])
+                parts.extend(
+                    [
+                        f"### {comment.created_at.isoformat()}",
+                        comment.body,
+                        "",
+                    ]
+                )
 
         return "\n".join(parts)
 
@@ -260,9 +261,7 @@ class FilesystemClient(IssueTracker):
         content = self._serialize_issue(issue)
         self._issue_path(issue_id).write_text(content)
 
-    async def update_issue_status(
-        self, repo: str, issue_id: str, status: IssueStatus
-    ) -> None:
+    async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         """Update the status of an issue."""
         issue = await self.get_issue(repo, issue_id)
         issue.status = status

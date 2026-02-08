@@ -10,10 +10,10 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-
 # =============================================================================
 # Utilities
 # =============================================================================
+
 
 def utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
@@ -23,6 +23,7 @@ def utc_now() -> datetime:
 # =============================================================================
 # Models
 # =============================================================================
+
 
 class IssueStatus(str, Enum):
     """Status of an issue."""
@@ -61,6 +62,7 @@ class IssueInfo(BaseModel):
 # =============================================================================
 # Service Interface (ABC)
 # =============================================================================
+
 
 class IssueTracker(ABC):
     """Abstract interface for issue tracking systems."""
@@ -118,6 +120,26 @@ class IssueTracker(ABC):
         pass
 
     @abstractmethod
+    async def list_issues(
+        self,
+        repo: str,
+        status: IssueStatus | None = None,
+        labels: list[str] | None = None,
+    ) -> list[IssueInfo]:
+        """
+        List issues with optional filters.
+
+        Args:
+            repo: Repository in owner/name format.
+            status: Filter by issue status.
+            labels: Filter by labels.
+
+        Returns:
+            List of matching IssueInfo.
+        """
+        pass
+
+    @abstractmethod
     async def add_comment(self, repo: str, issue_id: str, body: str) -> None:
         """
         Add a comment to an issue.
@@ -130,9 +152,7 @@ class IssueTracker(ABC):
         pass
 
     @abstractmethod
-    async def update_issue_status(
-        self, repo: str, issue_id: str, status: IssueStatus
-    ) -> None:
+    async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         """
         Update the status of an issue.
 

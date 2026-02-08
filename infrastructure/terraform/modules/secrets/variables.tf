@@ -44,6 +44,20 @@ variable "github_webhook_secret" {
   default     = ""
 }
 
+variable "fly_api_token" {
+  description = "Fly.io API token for spawning worker machines"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "anthropic_api_key" {
+  description = "Anthropic API key for classification and planning"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

@@ -36,26 +36,43 @@ class Settings(BaseSettings):
     event_bus_max_size: int = 1000
 
     # Management loop
-    management_loop_interval_seconds: int = 300  # 5 minutes
+    management_loop_interval_seconds: int = 3600  # 1 hour
 
     # Agent execution
-    agent_bypass_permissions: bool = True  # Use bypassPermissions mode for autonomous agents (required for non-interactive execution)
+    agent_bypass_permissions: bool = (
+        True  # Use bypassPermissions mode for autonomous agents (required for non-interactive execution)
+    )
 
     # Testing overrides (for development/testing only)
     test_force_planning_only: bool = False  # Force agents to only create subissues, not write code
 
-    # AWS/SQS Configuration (for hybrid deployment)
-    aws_region: str = "us-west-2"
-    sqs_job_queue_url: str = ""  # URL for job-requests queue
-    sqs_result_queue_url: str = ""  # URL for job-results queue
-    sqs_poll_interval_seconds: int = 5  # How often worker polls for jobs
-    sqs_visibility_timeout_seconds: int = 3600  # Match execution timeout
+    # Target repository
+    target_repo: str = ""  # e.g. "myorg/myrepo"
+
+    # Fly.io configuration
+    fly_api_token: str = ""
+    fly_app_name: str = ""
+    fly_worker_image: str = ""
+    fly_worker_cpus: int = 2
+    fly_worker_memory_mb: int = 4096
+    fly_worker_region: str = "iad"
+
+    # Anthropic API (for classification/planning)
+    anthropic_api_key: str = ""
+    classification_model: str = "claude-sonnet-4-5-20250929"
+    planning_model: str = "claude-sonnet-4-5-20250929"
+
+    # Cost controls
+    max_tokens_per_run: int = 100000
+    max_cost_per_day_usd: float = 50.0
+    max_retries_per_issue: int = 2
+
+    # Dry run mode — reads from GitHub but logs all writes to file instead
+    dry_run: bool = False
+    dry_run_output_file: str = "dry_run_output.jsonl"
 
     # Deployment mode
-    deployment_mode: Literal["local", "coordinator", "worker"] = "local"
-    # local: In-memory event bus, everything runs in same process (development)
-    # coordinator: Publishes jobs to SQS, listens for results (cloud)
-    # worker: Polls SQS for jobs, runs agents locally (desktop)
+    deployment_mode: Literal["local", "coordinator"] = "local"
 
     model_config = {"env_prefix": "AGENT_GRID_", "env_file": ".env", "extra": "ignore"}
 

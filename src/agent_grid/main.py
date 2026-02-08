@@ -8,6 +8,17 @@ from typing import AsyncGenerator
 import uvicorn
 from fastapi import FastAPI
 
+from .config import settings
+from .coordinator import (
+    coordinator_router,
+    get_agent_event_logger,
+    get_database,
+    get_management_loop,
+    get_scheduler,
+)
+from .execution_grid import event_bus
+from .issue_tracker import get_issue_tracker, issues_router, webhook_router
+
 # Configure logging for agent event streaming
 logging.basicConfig(
     level=logging.INFO,
@@ -16,17 +27,6 @@ logging.basicConfig(
 )
 # Ensure agent event logger is visible
 logging.getLogger("agent_grid.agent").setLevel(logging.INFO)
-
-from .execution_grid import event_bus, get_execution_grid
-from .config import settings
-from .coordinator import (
-    coordinator_router,
-    get_database,
-    get_management_loop,
-    get_scheduler,
-    get_agent_event_logger,
-)
-from .issue_tracker import webhook_router, issues_router, get_issue_tracker
 
 
 async def _connect_database_background(db, logger) -> None:
@@ -60,21 +60,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db = get_database()
     db_task = asyncio.create_task(_connect_database_background(db, logger))
 
-    # Start SQS grid result listener if in coordinator mode
-    if settings.deployment_mode == "coordinator":
-        grid = get_execution_grid()
-        if hasattr(grid, "start"):
-            await grid.start()
-            logger.info("SQS grid started")
-
     # Start scheduler
     scheduler = get_scheduler()
     await scheduler.start()
     logger.info("Scheduler started")
 
-    # Start management loop
+    # Start management loop (7-phase cron)
     management_loop = get_management_loop()
     await management_loop.start()
+    logger.info("Management loop started")
 
     # Start agent event logger for real-time streaming
     agent_logger = get_agent_event_logger()
@@ -89,16 +83,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await management_loop.stop()
     await scheduler.stop()
 
-    # Stop SQS grid if in coordinator mode
-    if settings.deployment_mode == "coordinator":
-        grid = get_execution_grid()
-        if hasattr(grid, "stop"):
-            await grid.stop()
-
     await event_bus.stop()
 
     tracker = get_issue_tracker()
     await tracker.close()
+
+    # Close Fly client if in coordinator mode
+    if settings.deployment_mode == "coordinator":
+        from .fly import get_fly_client
+
+        fly_client = get_fly_client()
+        await fly_client.close()
 
     # Wait for db connection task and close if connected
     if not db_task.done():

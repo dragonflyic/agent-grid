@@ -1,10 +1,8 @@
 """Tests for coordinator module."""
 
-import pytest
 from uuid import uuid4
 
 from agent_grid.coordinator import NudgeRequest
-from agent_grid.execution_grid import AgentExecution, ExecutionStatus
 
 
 class TestNudgeRequest:
@@ -38,6 +36,7 @@ class TestBudgetManager:
     def test_max_concurrent_default(self):
         """Test default max concurrent is set."""
         from agent_grid.config import settings
+
         assert settings.max_concurrent_executions > 0
 
 
@@ -66,20 +65,23 @@ class TestScheduler:
         from agent_grid.coordinator.scheduler import Scheduler
 
         scheduler = Scheduler()
-        assert scheduler._extract_repo_from_url(
-            "https://github.com/owner/repo.git"
-        ) == "owner/repo"
-        assert scheduler._extract_repo_from_url(
-            "https://github.com/owner/repo"
-        ) == "owner/repo"
+        assert scheduler._extract_repo_from_url("https://github.com/owner/repo.git") == "owner/repo"
+        assert scheduler._extract_repo_from_url("https://github.com/owner/repo") == "owner/repo"
 
-    def test_generate_prompt(self):
-        """Test prompt generation."""
-        from agent_grid.coordinator.scheduler import Scheduler
+    def test_prompt_builder(self):
+        """Test prompt generation via prompt_builder."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+        from agent_grid.issue_tracker.public_api import IssueInfo
 
-        scheduler = Scheduler()
-        prompt = scheduler._generate_prompt("Fix bug", "The app crashes on startup", "42", "owner/repo")
+        issue = IssueInfo(
+            id="42",
+            number=42,
+            title="Fix bug",
+            body="The app crashes on startup",
+            labels=[],
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/42",
+        )
+        prompt = build_prompt(issue, "owner/repo", mode="implement")
         assert "Fix bug" in prompt
         assert "crashes on startup" in prompt
-        assert "#42" in prompt
-        assert "agent/42" in prompt  # Branch name should be included
