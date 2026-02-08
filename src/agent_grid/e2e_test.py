@@ -1,6 +1,7 @@
-"""End-to-end test: scan → classify → pick easiest → run agent locally → show diff.
+"""End-to-end test: uses the real engine pipeline, runs agent locally, shows diff.
 
-Reads from your real GitHub repo. Runs a real Claude Code agent.
+Uses our actual Scanner, Classifier, prompt_builder, and dry-run wrappers.
+Reads from your real GitHub repo. Runs a real Claude Code agent locally.
 Does NOT write anything to GitHub — no push, no PRs, no comments, no labels.
 
 Usage:
@@ -10,14 +11,13 @@ Usage:
     python -m agent_grid.e2e_test
 
 Optional:
-    AGENT_GRID_E2E_ISSUE=42   — skip classification, test a specific issue number
+    AGENT_GRID_E2E_ISSUE=42   — skip scanning/classification, test a specific issue
 """
 
 import asyncio
 import json
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,16 +33,20 @@ logger = logging.getLogger("agent_grid.e2e_test")
 
 async def main():
     from .config import settings
+    from .dry_run import install_dry_run_wrappers
 
-    # ── Validate settings ────────────────────────────────────────────────
+    # ── Validate ─────────────────────────────────────────────────────────
+    errors = []
     if not settings.target_repo:
-        print("ERROR: Set AGENT_GRID_TARGET_REPO=owner/repo")
-        sys.exit(1)
+        errors.append("AGENT_GRID_TARGET_REPO=owner/repo")
     if not settings.github_token:
-        print("ERROR: Set AGENT_GRID_GITHUB_TOKEN=ghp_...")
-        sys.exit(1)
+        errors.append("AGENT_GRID_GITHUB_TOKEN=ghp_...")
     if not settings.anthropic_api_key:
-        print("ERROR: Set AGENT_GRID_ANTHROPIC_API_KEY=sk-ant-...")
+        errors.append("AGENT_GRID_ANTHROPIC_API_KEY=sk-ant-...")
+    if errors:
+        print("ERROR: Missing environment variables:")
+        for e in errors:
+            print(f"  export {e}")
         sys.exit(1)
 
     repo = settings.target_repo
@@ -50,86 +54,103 @@ async def main():
     print(f"  End-to-end test for: {repo}")
     print(f"{'='*60}\n")
 
-    # ── Phase 1: Find the target issue ───────────────────────────────────
-    from .issue_tracker.github_client import GitHubClient
-    github = GitHubClient(token=settings.github_token)
+    # ── Install dry-run wrappers (real reads, logged writes) ─────────────
+    install_dry_run_wrappers()
 
+    # ── Phase 1 & 2: Use our real Scanner and Classifier ─────────────────
+    from .coordinator.scanner import get_scanner
+    from .coordinator.classifier import get_classifier
+    from .coordinator.prompt_builder import build_prompt
+    from .issue_tracker import get_issue_tracker
+
+    tracker = get_issue_tracker()
     specific_issue = os.environ.get("AGENT_GRID_E2E_ISSUE")
 
     if specific_issue:
-        # User specified a specific issue
-        print(f"Using specified issue #{specific_issue}")
-        issue = await github.get_issue(repo, specific_issue)
+        print(f"Using specified issue #{specific_issue}\n")
+        issue = await tracker.get_issue(repo, specific_issue)
         classification_info = "(user-specified, skipping classification)"
     else:
-        # Scan and classify
-        from .issue_tracker.public_api import IssueStatus
-        from .coordinator.scanner import HANDLED_LABELS
-
-        print("Phase 1: Scanning open issues...")
-        all_issues = await github.list_issues(repo, status=IssueStatus.OPEN)
-
-        # Filter out already-handled issues and PRs
-        candidates = [
-            i for i in all_issues
-            if not any(l in HANDLED_LABELS for l in i.labels)
-        ]
+        # Phase 1: Scan using our real Scanner
+        print("Phase 1: Scanning (using Scanner from coordinator.scanner)...")
+        scanner = get_scanner()
+        candidates = await scanner.scan(repo)
 
         if not candidates:
-            print("No candidate issues found. All issues either have ai-* labels or the repo has no open issues.")
-            await github.close()
+            print("No candidate issues found.")
+            await tracker.close()
             return
 
         print(f"Found {len(candidates)} candidate issues:")
-        for i, issue in enumerate(candidates[:10]):
-            labels_str = f" [{', '.join(issue.labels)}]" if issue.labels else ""
-            print(f"  {i+1}. #{issue.number}: {issue.title}{labels_str}")
+        for i, iss in enumerate(candidates[:15]):
+            labels_str = f" [{', '.join(iss.labels)}]" if iss.labels else ""
+            print(f"  {i+1}. #{iss.number}: {iss.title}{labels_str}")
 
-        # Phase 2: Classify
-        print(f"\nPhase 2: Classifying {len(candidates)} issues...")
-        from .coordinator.classifier import Classifier
-
-        classifier = Classifier()
+        # Phase 2: Classify using our real Classifier
+        print(f"\nPhase 2: Classifying (using Classifier from coordinator.classifier)...")
+        classifier = get_classifier()
         classified = []
-        for issue in candidates:
-            classification = await classifier.classify(issue)
-            classified.append((issue, classification))
-            emoji = {"SIMPLE": "✅", "COMPLEX": "🔧", "BLOCKED": "🚫", "SKIP": "⏭️"}.get(classification.category, "?")
-            print(f"  {emoji} #{issue.number}: {classification.category} (complexity={classification.estimated_complexity}) — {classification.reason}")
+        for iss in candidates:
+            classification = await classifier.classify(iss)
+            classified.append((iss, classification))
+            symbol = {"SIMPLE": "+", "COMPLEX": "*", "BLOCKED": "!", "SKIP": "-"}.get(classification.category, "?")
+            print(f"  [{symbol}] #{iss.number}: {classification.category} "
+                  f"(complexity={classification.estimated_complexity}) "
+                  f"-- {classification.reason}")
 
         # Pick the easiest SIMPLE issue
         simple_issues = [
-            (issue, c) for issue, c in classified
+            (iss, c) for iss, c in classified
             if c.category == "SIMPLE"
         ]
-
         if not simple_issues:
-            print("\nNo SIMPLE issues found. Picking the least complex issue instead.")
+            print("\nNo SIMPLE issues found. Picking the least complex one.")
             classified.sort(key=lambda x: x[1].estimated_complexity)
             issue, classification = classified[0]
         else:
             simple_issues.sort(key=lambda x: x[1].estimated_complexity)
             issue, classification = simple_issues[0]
 
-        classification_info = f"{classification.category} (complexity={classification.estimated_complexity}): {classification.reason}"
+        classification_info = (f"{classification.category} "
+                               f"(complexity={classification.estimated_complexity}): "
+                               f"{classification.reason}")
 
-    print(f"\n{'─'*60}")
-    print(f"  Selected: #{issue.number} — {issue.title}")
+    print(f"\n{'~'*60}")
+    print(f"  Selected: #{issue.number} -- {issue.title}")
     print(f"  Classification: {classification_info}")
-    print(f"{'─'*60}")
+    print(f"{'~'*60}")
 
-    # Show issue body preview
     if issue.body:
-        body_preview = issue.body[:500]
-        if len(issue.body) > 500:
-            body_preview += "..."
-        print(f"\n  Body:\n  {body_preview}\n")
+        preview = issue.body[:400] + ("..." if len(issue.body) > 400 else "")
+        print(f"\n  Body:\n  {preview}\n")
 
-    # ── Phase 3: Clone repo and run agent ────────────────────────────────
+    # ── Phase 3: Build prompt using our real prompt_builder ───────────────
+    print("Phase 3: Building prompt (using prompt_builder.build_prompt)...")
+    raw_prompt = build_prompt(issue, repo, mode="implement")
+
+    # Append local-test override: don't push, don't create PR, don't comment
+    local_override = """
+
+## LOCAL TEST MODE OVERRIDE
+You are running in a local test. Additional rules:
+- The branch is already checked out for you. Do NOT run git checkout -b.
+- Implement the changes and commit them locally.
+- Do NOT push to any remote.
+- Do NOT create a pull request.
+- Do NOT run any `gh` commands.
+- Do NOT post comments to GitHub issues.
+- Just implement, test, and commit locally.
+"""
+    prompt = raw_prompt + local_override
+
+    print(f"  Prompt length: {len(prompt)} chars")
+    print(f"  Mode: implement")
+
+    # ── Phase 4: Clone repo and run agent ────────────────────────────────
     workdir = tempfile.mkdtemp(prefix="agent-grid-e2e-")
     repo_dir = os.path.join(workdir, "repo")
 
-    print(f"Phase 3: Cloning {repo} to {repo_dir}...")
+    print(f"\nPhase 4: Cloning {repo}...")
     clone_url = f"https://x-access-token:{settings.github_token}@github.com/{repo}.git"
     result = subprocess.run(
         ["git", "clone", "--depth=50", clone_url, repo_dir],
@@ -137,54 +158,32 @@ async def main():
     )
     if result.returncode != 0:
         print(f"ERROR: git clone failed:\n{result.stderr}")
-        await github.close()
+        await tracker.close()
         return
 
-    # Create a local-only branch (never pushed)
-    branch_name = f"agent/{issue.number}-e2e-test"
+    # Create the branch the prompt_builder expects
+    branch_name = f"agent/{issue.number}"
     subprocess.run(
         ["git", "checkout", "-b", branch_name],
         cwd=repo_dir, capture_output=True,
     )
-
-    # Build the agent prompt — modified to NOT push or create PRs
-    prompt = f"""You are a senior software engineer working on a GitHub issue.
-
-## Repository
-- Repo: {repo}
-
-## Your Task
-Issue #{issue.number}: {issue.title}
-
-{issue.body or '(no description)'}
-
-## Rules
-1. Work ONLY on what the issue asks for. Do not refactor unrelated code.
-2. Write tests for your changes if appropriate.
-3. Run existing tests and make sure they pass.
-4. Follow the existing code style in the repo.
-5. Make atomic, well-described commits.
-
-## IMPORTANT: LOCAL TEST MODE
-You are running in a LOCAL TEST. Do the following:
-- Work on branch: {branch_name} (already checked out)
-- Implement the changes and commit them
-- Do NOT push to any remote
-- Do NOT create a PR
-- Do NOT run `gh` commands
-- Do NOT post comments to GitHub
-- Just implement, test, and commit locally
-"""
-
-    print(f"\nPhase 4: Running Claude Code agent...")
+    print(f"  Cloned to: {repo_dir}")
     print(f"  Branch: {branch_name}")
-    print(f"  Workdir: {repo_dir}")
-    print(f"  Prompt length: {len(prompt)} chars")
-    print(f"\n{'─'*60}")
-    print("  Agent output:")
-    print(f"{'─'*60}\n")
 
-    # Run Claude Code SDK
+    # Detect default branch name for diff later
+    default_branch_result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "origin/HEAD"],
+        cwd=repo_dir, capture_output=True, text=True,
+    )
+    default_branch = default_branch_result.stdout.strip().replace("origin/", "") or "main"
+
+    # ── Phase 5: Run Claude Code SDK ─────────────────────────────────────
+    print(f"\nPhase 5: Running Claude Code agent...")
+    print(f"{'~'*60}")
+    print("  Agent output:")
+    print(f"{'~'*60}\n")
+
+    agent_result = ""
     try:
         from claude_code_sdk import query, ClaudeCodeOptions
         from claude_code_sdk.types import AssistantMessage, ResultMessage, ToolUseMessage, ToolResultMessage
@@ -194,10 +193,10 @@ You are running in a LOCAL TEST. Do the following:
             permission_mode="bypassPermissions",
         )
 
-        agent_result = ""
         async for message in query(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
-                print(f"  [assistant] {message.content[:200]}")
+                text = message.content[:200] if isinstance(message.content, str) else str(message.content)[:200]
+                print(f"  [assistant] {text}")
             elif isinstance(message, ResultMessage):
                 agent_result = message.result or ""
                 print(f"\n  [result] {agent_result[:500]}")
@@ -208,29 +207,29 @@ You are running in a LOCAL TEST. Do the following:
                 print(f"  [tool_result] {output}")
 
     except ImportError:
-        print("\n  claude-code-sdk not installed. Simulating agent run...")
+        print("  claude-code-sdk not installed.")
         print("  Install with: pip install claude-code-sdk")
-        print("\n  Falling back to showing the prompt that WOULD be sent:\n")
-        print(f"  {prompt[:1000]}")
-        agent_result = "(sdk not installed — simulation only)"
+        print(f"\n  Prompt that WOULD be sent ({len(prompt)} chars):\n")
+        print(f"  {prompt[:800]}")
+        agent_result = "(sdk not installed)"
 
     except Exception as e:
         print(f"\n  Agent error: {e}")
         agent_result = f"Error: {e}"
 
-    # ── Phase 5: Show results ────────────────────────────────────────────
+    # ── Phase 6: Show results ────────────────────────────────────────────
     print(f"\n{'='*60}")
     print("  Results")
     print(f"{'='*60}\n")
 
     # Show git log
     log_result = subprocess.run(
-        ["git", "log", "--oneline", f"main..{branch_name}"],
+        ["git", "log", "--oneline", f"{default_branch}..{branch_name}"],
         cwd=repo_dir, capture_output=True, text=True,
     )
     commits = log_result.stdout.strip()
     if commits:
-        print("Commits made:")
+        print("Commits:")
         for line in commits.split("\n"):
             print(f"  {line}")
     else:
@@ -238,26 +237,27 @@ You are running in a LOCAL TEST. Do the following:
 
     # Show diff stat
     diff_stat = subprocess.run(
-        ["git", "diff", "--stat", f"main..{branch_name}"],
+        ["git", "diff", "--stat", f"{default_branch}..{branch_name}"],
         cwd=repo_dir, capture_output=True, text=True,
     )
     if diff_stat.stdout.strip():
         print(f"\nFiles changed:\n{diff_stat.stdout}")
 
-    # Show full diff
+    # Full diff
     diff_result = subprocess.run(
-        ["git", "diff", f"main..{branch_name}"],
+        ["git", "diff", f"{default_branch}..{branch_name}"],
         cwd=repo_dir, capture_output=True, text=True,
     )
-    diff_text = diff_result.stdout
 
-    # Save diff to file for review
+    # Save artifacts
     diff_file = Path(workdir) / "agent_diff.patch"
-    diff_file.write_text(diff_text)
+    diff_file.write_text(diff_result.stdout)
 
-    # Save full log
+    prompt_file = Path(workdir) / "prompt.txt"
+    prompt_file.write_text(prompt)
+
     summary_file = Path(workdir) / "e2e_summary.json"
-    summary = {
+    summary_file.write_text(json.dumps({
         "repo": repo,
         "issue_number": issue.number,
         "issue_title": issue.title,
@@ -267,23 +267,22 @@ You are running in a LOCAL TEST. Do the following:
         "commits": commits,
         "diff_stat": diff_stat.stdout.strip(),
         "agent_result": agent_result[:2000],
-        "diff_file": str(diff_file),
-    }
-    summary_file.write_text(json.dumps(summary, indent=2))
+    }, indent=2))
 
-    print(f"\nFiles saved:")
+    print(f"Artifacts saved:")
+    print(f"  Prompt:  {prompt_file}")
     print(f"  Diff:    {diff_file}")
     print(f"  Summary: {summary_file}")
     print(f"  Repo:    {repo_dir}")
-    print(f"\nTo inspect the agent's work:")
+    print(f"\nInspect:")
     print(f"  cd {repo_dir}")
     print(f"  git log --oneline")
-    print(f"  git diff main..{branch_name}")
-    print(f"\nTo clean up:")
+    print(f"  git diff {default_branch}..{branch_name}")
+    print(f"\nClean up:")
     print(f"  rm -rf {workdir}")
 
-    await github.close()
-    print(f"\nDone! Nothing was written to GitHub.")
+    await tracker.close()
+    print(f"\nDone. Nothing was written to GitHub.")
 
 
 if __name__ == "__main__":
