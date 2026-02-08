@@ -8,6 +8,7 @@ import logging
 
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
+from ..issue_tracker.metadata import extract_metadata
 from .database import get_database
 
 logger = logging.getLogger("agent_grid.blocker_resolver")
@@ -22,7 +23,11 @@ class BlockerResolver:
         self._db = get_database()
 
     async def check_blocked_issues(self, repo: str) -> list[str]:
-        """Check ai-blocked issues for new human comments.
+        """Check ag/blocked issues for human replies after the agent's question.
+
+        Logic: find the agent's blocking comment (has TECH_LEAD_AGENT_META with
+        type=blocked), then check if any comment after it is from a human
+        (no TECH_LEAD_AGENT_META). If so, unblock.
 
         Returns list of issue IDs that were unblocked.
         """
@@ -31,39 +36,43 @@ class BlockerResolver:
         if not isinstance(self._tracker, GitHubClient):
             return []
 
+        # list_issues doesn't fetch comments, so we get IDs first
         blocked_issues = await self._tracker.list_issues(
             repo,
             labels=["ag/blocked"],
         )
 
-        last_check_state = await self._db.get_cron_state("last_blocker_check")
-        last_check = last_check_state.get("timestamp") if last_check_state else None
-
         unblocked = []
 
-        for issue in blocked_issues:
-            # Check if there are new comments since last check
-            has_new_comments = False
-            for comment in issue.comments:
-                comment_time = comment.created_at.isoformat() if comment.created_at else ""
-                if not last_check or comment_time > last_check:
-                    has_new_comments = True
-                    break
+        for brief in blocked_issues:
+            # Fetch full issue with comments
+            issue = await self._tracker.get_issue(repo, brief.id)
 
-            if has_new_comments:
-                # Unblock: remove ai-blocked, scanner will pick it up
-                await self._labels.remove_label(repo, issue.id, "ag/blocked")
+            if self._has_human_reply_after_block(issue.comments):
+                await self._labels.transition_to(repo, issue.id, "ag/todo")
                 logger.info(f"Unblocked issue #{issue.number} — human responded")
                 unblocked.append(issue.id)
 
-        from datetime import datetime
-
-        await self._db.set_cron_state(
-            "last_blocker_check",
-            {"timestamp": datetime.utcnow().isoformat()},
-        )
-
         return unblocked
+
+    def _has_human_reply_after_block(self, comments: list) -> bool:
+        """Check if a human replied after the agent's blocking comment."""
+        # Find the last agent blocking comment
+        last_block_idx = None
+        for i, comment in enumerate(comments):
+            meta = extract_metadata(comment.body)
+            if meta and meta.get("type") == "blocked":
+                last_block_idx = i
+
+        if last_block_idx is None:
+            return False
+
+        # Check if any comment after it is from a human (no agent metadata)
+        for comment in comments[last_block_idx + 1 :]:
+            if extract_metadata(comment.body) is None:
+                return True
+
+        return False
 
 
 _blocker_resolver: BlockerResolver | None = None
