@@ -12,12 +12,11 @@ terraform {
     }
   }
 
-  # For MVP, use local state. Configure S3 backend for production:
-  # backend "s3" {
-  #   bucket = "agent-grid-terraform-state"
-  #   key    = "dev/terraform.tfstate"
-  #   region = "us-west-2"
-  # }
+  backend "s3" {
+    bucket = "agent-grid-terraform-state"
+    key    = "dev/terraform.tfstate"
+    region = "us-west-2"
+  }
 }
 
 provider "aws" {
