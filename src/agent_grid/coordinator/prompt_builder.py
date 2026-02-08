@@ -21,6 +21,14 @@ def build_prompt(
     context = context or {}
     branch_name = f"agent/{issue.number}"
 
+    # Format clarification thread if present
+    clarification = ""
+    if context.get("clarification_comments"):
+        clarification = "\n\n## Clarification from human\n"
+        clarification += "The agent previously asked for clarification and a human replied:\n\n"
+        for c in context["clarification_comments"]:
+            clarification += f"> {c}\n\n"
+
     base = f"""You are a senior software engineer working on a GitHub issue.
 
 ## Repository
@@ -30,6 +38,7 @@ def build_prompt(
 Issue #{issue.number}: {issue.title}
 
 {issue.body or "(no description)"}
+{clarification}
 
 ## Rules
 1. Work ONLY on what the issue asks for. Do not refactor unrelated code.

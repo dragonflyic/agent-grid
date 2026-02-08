@@ -1,7 +1,7 @@
 """Phase 7: Monitor ag/blocked issues for human responses.
 
-When a human responds to a blocked issue, remove ag/blocked label
-so the scanner picks it up again next cycle.
+When a human responds to a blocked issue, launch an agent directly
+with the full context (issue + clarification comments).
 """
 
 import logging
@@ -9,6 +9,7 @@ import logging
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
 from ..issue_tracker.metadata import extract_metadata
+from ..issue_tracker.public_api import IssueInfo
 from .database import get_database
 
 logger = logging.getLogger("agent_grid.blocker_resolver")
@@ -22,14 +23,14 @@ class BlockerResolver:
         self._labels = get_label_manager()
         self._db = get_database()
 
-    async def check_blocked_issues(self, repo: str) -> list[str]:
+    async def check_blocked_issues(self, repo: str) -> list[IssueInfo]:
         """Check ag/blocked issues for human replies after the agent's question.
 
         Logic: find the agent's blocking comment (has TECH_LEAD_AGENT_META with
         type=blocked), then check if any comment after it is from a human
-        (no TECH_LEAD_AGENT_META). If so, unblock.
+        (no TECH_LEAD_AGENT_META). If so, return the issue for direct launch.
 
-        Returns list of issue IDs that were unblocked.
+        Returns list of IssueInfo objects that were unblocked (with comments).
         """
         from ..issue_tracker.github_client import GitHubClient
 
@@ -49,9 +50,8 @@ class BlockerResolver:
             issue = await self._tracker.get_issue(repo, brief.id)
 
             if self._has_human_reply_after_block(issue.comments):
-                await self._labels.transition_to(repo, issue.id, "ag/todo")
-                logger.info(f"Unblocked issue #{issue.number} — human responded")
-                unblocked.append(issue.id)
+                logger.info(f"Issue #{issue.number} has human reply — ready to launch")
+                unblocked.append(issue)
 
         return unblocked
 
