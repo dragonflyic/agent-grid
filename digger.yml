@@ -1,4 +1,19 @@
 projects:
-  - name: dev
-    dir: infrastructure/terraform/environments/dev/
+  - name: agent-grid-infra
+    dir: infrastructure/terraform/environments/dev
     opentofu: true
+    terraform: false
+    workflow: default
+
+workflows:
+  default:
+    plan:
+      steps:
+        - init
+        - plan
+    apply:
+      steps:
+        - init
+        - apply
+    on_commit_to_default:
+      - apply
