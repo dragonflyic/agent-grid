@@ -41,10 +41,18 @@ Issue #{issue.number}: {issue.title}
    - Explain exactly what you need answered
    - Then EXIT
 7. When done:
-   - Push your branch
-   - Create a PR using: gh pr create --title "..." --body "..."
-   - Link the PR to the issue with "Closes #{issue.number}" in the body
-   - After creating the PR, link it to the issue: gh pr edit --add-issue #{issue.number}
+   - Push your branch and create a PR that closes the issue.
+   - If the repo has a `/ship` skill (check .claude/skills/), use it:
+     `/ship` with a commit message, PR title, and body that references "Closes #{issue.number}"
+   - Otherwise, manually:
+     - Push your branch
+     - Create a PR using: gh pr create --title "..." --body "Closes #{issue.number}\\n\\n..."
+     - Link PR to issue: gh pr edit --add-issue #{issue.number}
+
+## Skills
+Check the `.claude/skills/` directory in the repo for available skills.
+Skills contain repo-specific coding standards, workflows, and tools.
+Follow any auto-triggered skills (user-invocable: false) — they define the repo's conventions.
 """
 
     if mode == "implement":
