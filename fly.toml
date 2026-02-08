@@ -1,0 +1,26 @@
+app = "agent-grid"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  AGENT_GRID_HOST = "0.0.0.0"
+  AGENT_GRID_PORT = "8000"
+  AGENT_GRID_DEPLOYMENT_MODE = "coordinator"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8000
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
