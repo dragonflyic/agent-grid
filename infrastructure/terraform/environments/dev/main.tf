@@ -48,16 +48,6 @@ data "aws_subnets" "default" {
   }
 }
 
-# SQS Queues
-module "queues" {
-  source = "../../modules/queues"
-
-  project_name               = var.project_name
-  visibility_timeout_seconds = 3600 # 1 hour for long-running agents
-
-  tags = local.tags
-}
-
 # Networking (NAT Gateway for App Runner to access external services)
 module "networking" {
   source = "../../modules/networking"
@@ -150,8 +140,7 @@ module "apprunner" {
   cpu          = "512"
   memory       = "1024"
 
-  sqs_policy_arn        = module.queues.coordinator_policy_arn
-  attach_sqs_policy     = true
+  attach_sqs_policy     = false
   secret_arns           = module.secrets.all_secret_arns
   attach_secrets_policy = true
 
@@ -159,10 +148,8 @@ module "apprunner" {
   vpc_connector_security_groups = [aws_security_group.apprunner_private.id]
 
   environment_variables = {
-    AGENT_GRID_AWS_REGION           = var.aws_region
-    AGENT_GRID_SQS_JOB_QUEUE_URL    = module.queues.jobs_queue_url
-    AGENT_GRID_SQS_RESULT_QUEUE_URL = module.queues.results_queue_url
-    AGENT_GRID_ISSUE_TRACKER_TYPE   = "github"
+    AGENT_GRID_AWS_REGION         = var.aws_region
+    AGENT_GRID_ISSUE_TRACKER_TYPE = "github"
   }
 
   environment_secrets = merge(
