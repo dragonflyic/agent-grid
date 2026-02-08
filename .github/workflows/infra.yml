@@ -67,13 +67,12 @@ jobs:
       - name: Comment plan on PR
         if: always() && steps.plan.outputs.plan_output
         uses: actions/github-script@v7
+        env:
+          PLAN_OUTPUT: ${{ steps.plan.outputs.plan_output }}
         with:
           script: |
-            const output = `#### OpenTofu Plan
-            \`\`\`
-            ${{ steps.plan.outputs.plan_output }}
-            \`\`\`
-            *Triggered by @${{ github.actor }} via ${{ github.event_name }}*`;
+            const plan = process.env.PLAN_OUTPUT;
+            const output = `#### OpenTofu Plan\n\`\`\`\n${plan}\n\`\`\`\n*Triggered by @${{ github.actor }}*`;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
