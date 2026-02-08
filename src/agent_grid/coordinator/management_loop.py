@@ -16,7 +16,6 @@ import logging
 from ..config import settings
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
-from ..issue_tracker.metadata import embed_metadata
 from .blocker_resolver import get_blocker_resolver
 from .budget_manager import get_budget_manager
 from .classifier import get_classifier
@@ -102,15 +101,6 @@ class ManagementLoop:
                 await self._launch_simple(repo, issue)
             elif classification.category == "COMPLEX":
                 await self._launch_planner(repo, issue)
-            elif classification.category == "BLOCKED":
-                await labels.transition_to(repo, issue.id, "ag/blocked")
-                question = classification.blocking_question or classification.reason
-                comment = embed_metadata(
-                    f"**Agent needs clarification:**\n\n{question}",
-                    {"type": "blocked", "reason": classification.reason},
-                )
-                await self._tracker.add_comment(repo, issue.id, comment)
-                logger.info(f"Issue #{issue.number}: BLOCKED — posted question")
             elif classification.category == "SKIP":
                 await labels.transition_to(repo, issue.id, "ag/skipped")
                 await self._tracker.add_comment(

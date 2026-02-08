@@ -41,16 +41,19 @@ Issue Body:
 Labels: {labels}
 
 Classify as ONE of:
-A. SIMPLE — Can be done in a single PR by one agent. Estimated: < 200 lines changed, single concern, clear scope.
-B. COMPLEX — Needs decomposition into sub-tasks. Estimated: multiple files/concerns, needs a plan first.
-C. BLOCKED — Missing information, ambiguous requirements, needs human clarification before work can begin.
-D. SKIP — Not suitable for AI (too creative, too risky, requires domain expertise beyond code).
+A. SIMPLE — Single PR by one agent. < 200 lines changed, single concern.
+   If vague but still actionable by a dev with codebase access, use SIMPLE.
+B. COMPLEX — Needs decomposition. Multiple files/concerns, needs a plan.
+C. SKIP — Not suitable for AI (too risky, needs domain expertise beyond code,
+   or completely nonsensical with no actionable work).
+
+Do NOT classify as blocked or needing clarification.
+The agent has full codebase access and can figure out ambiguity itself.
 
 Respond as JSON:
 {{
-  "category": "SIMPLE" | "COMPLEX" | "BLOCKED" | "SKIP",
+  "category": "SIMPLE" | "COMPLEX" | "SKIP",
   "reason": "one sentence explaining why",
-  "blocking_question": "question for human, only if BLOCKED",
   "estimated_complexity": 1-10,
   "dependencies": [list of issue numbers this depends on, if any]
 }}
