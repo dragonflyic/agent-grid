@@ -41,10 +41,16 @@ Issue Body:
 Labels: {labels}
 
 Classify as ONE of:
-A. SIMPLE — Can be done in a single PR by one agent. Estimated: < 200 lines changed, single concern, clear scope.
-B. COMPLEX — Needs decomposition into sub-tasks. Estimated: multiple files/concerns, needs a plan first.
-C. BLOCKED — Missing information, ambiguous requirements, needs human clarification before work can begin.
-D. SKIP — Not suitable for AI (too creative, too risky, requires domain expertise beyond code).
+A. SIMPLE — Single PR by one agent. < 200 lines changed, single concern.
+B. COMPLEX — Needs decomposition. Multiple files/concerns, needs a plan.
+   Use this when you'd want to confirm the approach with the user first.
+C. BLOCKED — Genuinely needs human input that a developer with full codebase
+   access CANNOT figure out. Examples: credentials needed, business policy
+   decisions, external service access, choosing between fundamentally different
+   product directions. Do NOT use BLOCKED for vague descriptions — the agent
+   can read the codebase and figure out what to do.
+D. SKIP — Not suitable for AI (too risky, needs domain expertise beyond code,
+   or completely nonsensical with no actionable work).
 
 Respond as JSON:
 {{

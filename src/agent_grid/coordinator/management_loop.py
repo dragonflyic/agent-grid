@@ -136,11 +136,13 @@ class ManagementLoop:
             if pr_info["issue_id"]:
                 await self._launch_retry(repo, pr_info)
 
-        # Phase 7: Resolve blockers
+        # Phase 7: Resolve blockers — launch agents directly for unblocked issues
         blocker_resolver = get_blocker_resolver()
         unblocked = await blocker_resolver.check_blocked_issues(repo)
+        for issue in unblocked:
+            await self._launch_unblocked(repo, issue)
         if unblocked:
-            logger.info(f"Phase 7: Unblocked {len(unblocked)} issues")
+            logger.info(f"Phase 7: Launched {len(unblocked)} unblocked issues")
 
         # Bonus: Check dependency resolution
         dep_resolver = get_dependency_resolver()
@@ -184,6 +186,55 @@ class ManagementLoop:
         )
         await self._db.create_execution(execution, issue_id=issue.id)
         logger.info(f"Issue #{issue.number}: SIMPLE — launched agent {execution_id}")
+
+    async def _launch_unblocked(self, repo: str, issue) -> None:
+        """Launch an agent for a previously-blocked issue that got a human reply."""
+        from ..execution_grid import ExecutionConfig, get_execution_grid
+        from ..issue_tracker.metadata import extract_metadata
+
+        labels = get_label_manager()
+        await labels.transition_to(repo, issue.id, "ag/in-progress")
+
+        # Extract human replies after the last blocking comment
+        clarification_comments = []
+        last_block_idx = None
+        for i, comment in enumerate(issue.comments):
+            meta = extract_metadata(comment.body)
+            if meta and meta.get("type") == "blocked":
+                last_block_idx = i
+
+        if last_block_idx is not None:
+            for comment in issue.comments[last_block_idx + 1 :]:
+                if extract_metadata(comment.body) is None:
+                    clarification_comments.append(comment.body)
+
+        context = {"clarification_comments": clarification_comments}
+        prompt = build_prompt(issue, repo, mode="implement", context=context)
+        config = ExecutionConfig(
+            repo_url=f"https://github.com/{repo}.git",
+            prompt=prompt,
+        )
+
+        grid = get_execution_grid()
+        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
+            execution_id = await grid.launch_agent(
+                config,
+                mode="implement",
+                issue_number=issue.number,
+            )
+        else:
+            execution_id = await grid.launch_agent(config)
+
+        from ..execution_grid import AgentExecution, ExecutionStatus
+
+        execution = AgentExecution(
+            id=execution_id,
+            repo_url=config.repo_url,
+            status=ExecutionStatus.PENDING,
+            prompt=prompt,
+        )
+        await self._db.create_execution(execution, issue_id=issue.id)
+        logger.info(f"Issue #{issue.number}: UNBLOCKED — launched agent {execution_id}")
 
     async def _launch_planner(self, repo: str, issue) -> None:
         """Launch an agent to decompose a COMPLEX issue into sub-issues."""
