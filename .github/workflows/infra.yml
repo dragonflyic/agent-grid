@@ -11,16 +11,9 @@ on:
     paths:
       - "infrastructure/terraform/**"
       - "digger.yml"
-  issue_comment:
-    types: [created]
-  workflow_dispatch:
-    inputs:
-      spec:
-        required: false
-      run_name:
-        required: false
 
 env:
+  WORKING_DIR: infrastructure/terraform/environments/dev
   TF_VAR_database_password: ${{ secrets.TF_VAR_DATABASE_PASSWORD }}
   TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
   TF_VAR_github_webhook_secret: ${{ secrets.TF_VAR_GITHUB_WEBHOOK_SECRET }}
@@ -30,55 +23,109 @@ env:
   TF_VAR_target_repo: ${{ vars.TF_VAR_TARGET_REPO }}
 
 jobs:
-  digger:
+  plan:
+    name: Tofu Plan
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
     permissions:
-      contents: write
-      actions: write
       id-token: write
+      contents: read
       pull-requests: write
-      issues: read
-      statuses: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: digger run
-        if: github.event_name != 'push'
-        uses: diggerhq/digger@vLatest
-        with:
-          no-backend: true
-          disable-locking: true
-          setup-aws: true
-          aws-role-to-assume: arn:aws:iam::796973497082:role/github-actions-terraform
-          aws-region: us-west-2
-          setup-opentofu: true
-          opentofu-version: 1.9.0
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Configure AWS credentials
-        if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::796973497082:role/github-actions-terraform
           aws-region: us-west-2
 
       - name: Setup OpenTofu
-        if: github.event_name == 'push'
         uses: opentofu/setup-opentofu@v1
         with:
           tofu_version: 1.9.0
 
-      - name: Tofu Apply
-        if: github.event_name == 'push'
-        working-directory: infrastructure/terraform/environments/dev
+      - name: Tofu Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: tofu init -no-color
+
+      - name: Tofu Plan
+        id: plan
+        working-directory: ${{ env.WORKING_DIR }}
         run: |
-          tofu init
-          tofu apply -auto-approve
+          set +e
+          OUTPUT=$(tofu plan -no-color 2>&1)
+          EXIT_CODE=$?
+          echo "$OUTPUT"
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "plan_output<<$EOF" >> "$GITHUB_OUTPUT"
+          echo "$OUTPUT" >> "$GITHUB_OUTPUT"
+          echo "$EOF" >> "$GITHUB_OUTPUT"
+          exit $EXIT_CODE
+
+      - name: Comment plan on PR
+        if: always() && steps.plan.outputs.plan_output
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### OpenTofu Plan
+            \`\`\`
+            ${{ steps.plan.outputs.plan_output }}
+            \`\`\`
+            *Triggered by @${{ github.actor }} via ${{ github.event_name }}*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('#### OpenTofu Plan')
+            );
+            const body = output.substring(0, 65536);
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  apply:
+    name: Tofu Apply
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::796973497082:role/github-actions-terraform
+          aws-region: us-west-2
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.9.0
+
+      - name: Tofu Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: tofu init -no-color
+
+      - name: Tofu Apply
+        working-directory: ${{ env.WORKING_DIR }}
+        run: tofu apply -auto-approve -no-color

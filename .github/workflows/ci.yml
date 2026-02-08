@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, mohithg/mew]
+    branches: [main]
 
 env:
   AWS_REGION: us-west-2
@@ -97,6 +97,7 @@ jobs:
 
   build-coordinator:
     name: Build & Push Coordinator Image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [lint, test]
     runs-on: ubuntu-latest
 
@@ -129,6 +130,7 @@ jobs:
 
   build-worker:
     name: Build & Push Worker Image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [lint, test]
     runs-on: ubuntu-latest
 
