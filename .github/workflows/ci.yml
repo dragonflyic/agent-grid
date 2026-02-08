@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, mohithg/mew]
 
 env:
   AWS_REGION: us-west-2
@@ -99,7 +99,7 @@ jobs:
     name: Build & Push Coordinator Image
     needs: [lint, test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
 
     permissions:
       id-token: write
@@ -132,7 +132,7 @@ jobs:
     name: Build & Push Worker Image
     needs: [lint, test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v4

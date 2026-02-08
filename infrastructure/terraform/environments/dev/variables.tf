@@ -67,3 +67,9 @@ variable "fly_worker_image" {
   type        = string
   default     = "registry.fly.io/agent-grid-workers:latest"
 }
+
+variable "dry_run" {
+  description = "Enable dry-run mode (reads GitHub but logs writes instead of executing them)"
+  type        = bool
+  default     = true
+}

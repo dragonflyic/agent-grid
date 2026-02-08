@@ -17,8 +17,16 @@ logger = logging.getLogger("agent_grid.scheduled_task")
 
 
 async def main() -> int:
-    from .coordinator.database import get_database
+    from .config import settings
     from .coordinator.management_loop import ManagementLoop
+
+    if settings.dry_run:
+        logger.info("DRY RUN MODE — reads from GitHub, no writes")
+        from .dry_run import install_dry_run_wrappers
+
+        install_dry_run_wrappers()
+
+    from .coordinator.database import get_database
 
     logger.info("Starting scheduled coordinator cycle...")
 

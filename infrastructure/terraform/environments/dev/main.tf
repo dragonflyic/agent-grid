@@ -186,6 +186,7 @@ module "ecs_scheduled_task" {
     AGENT_GRID_TARGET_REPO        = var.target_repo
     AGENT_GRID_FLY_APP_NAME       = var.fly_app_name
     AGENT_GRID_FLY_WORKER_IMAGE   = var.fly_worker_image
+    AGENT_GRID_DRY_RUN            = var.dry_run ? "true" : "false"
     PYTHONPATH                    = "/app/src"
     PYTHONUNBUFFERED               = "1"
   }
