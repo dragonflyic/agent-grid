@@ -99,7 +99,6 @@ jobs:
     name: Build & Push Coordinator Image
     needs: [lint, test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
 
     permissions:
       id-token: write
@@ -132,7 +131,6 @@ jobs:
     name: Build & Push Worker Image
     needs: [lint, test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v4
