@@ -86,6 +86,11 @@ class Planner:
                 messages=[{"role": "user", "content": prompt}],
             )
             text = response.content[0].text.strip()
+            # Strip markdown code fences if present
+            if text.startswith("```"):
+                lines = text.split("\n")
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                text = "\n".join(lines).strip()
             plan = json.loads(text)
         except Exception as e:
             logger.error(f"Planning failed for issue #{issue_number}: {e}")
