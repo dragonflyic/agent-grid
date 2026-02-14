@@ -58,6 +58,8 @@ Issue #{issue.number}: {issue.title}
      - Push your branch
      - Create a PR using: gh pr create --title "..." --body "Closes #{issue.number}\\n\\n..."
      - Link PR to issue: gh pr edit --add-issue #{issue.number}
+   - **EXIT immediately after the PR is created.** Do not continue working.
+     Your job is done once the PR exists. CI will run automatically.
 
 ## Skills
 Check the `.claude/skills/` directory in the repo for available skills.
@@ -179,6 +181,8 @@ Do NOT force push. Do NOT squash. Add commits on top.
 ```bash
 git push origin {existing_branch}
 ```
+
+**EXIT immediately after pushing.** Your job is done. CI will run automatically.
 """
         )
         if checkpoint:
@@ -213,10 +217,13 @@ Take a DIFFERENT approach based on the feedback. Start fresh:
 git checkout -b {new_branch}
 ```
 
-After implementation:
+After implementation, push and create a PR:
 ```bash
 git push -u origin {new_branch}
+gh pr create --title "..." --body "Closes #{issue.number}\\n\\n..."
 ```
+
+**EXIT immediately after the PR is created.** Your job is done. CI will run automatically.
 """
         )
         return prompt
@@ -261,6 +268,8 @@ git push origin {existing_branch}
 
 Do NOT create a new PR. Your commits will be added to the existing PR #{pr_number}.
 Do NOT force push or squash.
+
+**EXIT immediately after pushing.** Your job is done. CI will re-run automatically.
 """
         )
         if checkpoint:
