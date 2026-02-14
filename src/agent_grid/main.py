@@ -29,21 +29,36 @@ logging.basicConfig(
 logging.getLogger("agent_grid.agent").setLevel(logging.INFO)
 
 
-async def _connect_database_background(db, logger) -> None:
-    """Connect to database in background with retries."""
+async def _connect_and_start_services(db, logger) -> None:
+    """Connect to database, then start services that depend on it."""
     for attempt in range(3):
         try:
             logger.info(f"Connecting to database (attempt {attempt + 1}/3)...")
             await asyncio.wait_for(db.connect(), timeout=30)
             logger.info("Database connected successfully")
-            return
+            break
         except asyncio.TimeoutError:
             logger.warning(f"Database connection timeout (attempt {attempt + 1})")
         except Exception as e:
             logger.warning(f"Database connection failed (attempt {attempt + 1}): {e}")
         if attempt < 2:
             await asyncio.sleep(5)
-    logger.error("Failed to connect to database after 3 attempts")
+    else:
+        logger.error("Failed to connect to database after 3 attempts — services not started")
+        return
+
+    # Start services only after DB is ready
+    scheduler = get_scheduler()
+    await scheduler.start()
+    logger.info("Scheduler started")
+
+    management_loop = get_management_loop()
+    await management_loop.start()
+    logger.info("Management loop started")
+
+    agent_logger = get_agent_event_logger()
+    await agent_logger.start()
+    logger.info("All services started")
 
 
 @asynccontextmanager
@@ -56,31 +71,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await event_bus.start()
     logger.info("Event bus started")
 
-    # Connect database before starting services that depend on it
+    # Connect DB and start services in background so health checks respond immediately
     db = get_database()
-    await _connect_database_background(db, logger)
+    startup_task = asyncio.create_task(_connect_and_start_services(db, logger))
 
-    # Start scheduler
-    scheduler = get_scheduler()
-    await scheduler.start()
-    logger.info("Scheduler started")
-
-    # Start management loop (7-phase cron)
-    management_loop = get_management_loop()
-    await management_loop.start()
-    logger.info("Management loop started")
-
-    # Start agent event logger for real-time streaming
-    agent_logger = get_agent_event_logger()
-    await agent_logger.start()
-
-    logger.info("Agent Grid startup complete")
+    logger.info("Agent Grid accepting requests (services starting in background)")
     yield
 
     # Shutdown
     logger.info("Shutting down Agent Grid...")
+
+    # Wait for startup task if still running
+    if not startup_task.done():
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+
+    agent_logger = get_agent_event_logger()
     await agent_logger.stop()
+    management_loop = get_management_loop()
     await management_loop.stop()
+    scheduler = get_scheduler()
     await scheduler.stop()
 
     await event_bus.stop()
