@@ -26,9 +26,21 @@ echo "Clone complete. Branch: $(git branch --show-current)"
 
 # Run Claude Code SDK via Python
 python3 -c "
-import asyncio, json, os, sys
+import asyncio, json, os, sys, time
 from claude_code_sdk import query
-from claude_code_sdk.types import ClaudeCodeOptions, ResultMessage
+from claude_code_sdk.types import (
+    AssistantMessage,
+    ClaudeCodeOptions,
+    ResultMessage,
+    SystemMessage,
+    TextBlock,
+    ToolUseBlock,
+    ToolResultBlock,
+)
+
+def log(msg):
+    \"\"\"Print with flush so it appears in Fly logs immediately.\"\"\"
+    print(msg, flush=True)
 
 async def main():
     prompt = os.environ['PROMPT']
@@ -38,14 +50,41 @@ async def main():
     )
 
     result = ''
+    turn = 0
+    start = time.time()
+
     async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage) and message.result:
-            result = message.result
+        elapsed = int(time.time() - start)
+
+        if isinstance(message, AssistantMessage):
+            turn += 1
+            for block in message.content:
+                if isinstance(block, ToolUseBlock):
+                    # Log tool usage (most useful for observability)
+                    tool_input_summary = str(block.input)[:200]
+                    log(f'[turn {turn}] [{elapsed}s] Tool: {block.name} | {tool_input_summary}')
+                elif isinstance(block, TextBlock):
+                    # Log first 200 chars of assistant text
+                    text_preview = block.text[:200].replace('\n', ' ')
+                    if text_preview.strip():
+                        log(f'[turn {turn}] [{elapsed}s] Agent: {text_preview}')
+                elif isinstance(block, ToolResultBlock):
+                    # Log tool result status (not full output — too noisy)
+                    log(f'[turn {turn}] [{elapsed}s] Tool result (is_error={block.is_error})')
+
+        elif isinstance(message, SystemMessage):
+            log(f'[{elapsed}s] System: {message.subtype}')
+
+        elif isinstance(message, ResultMessage):
+            if message.result:
+                result = message.result
+            cost = f'\${message.total_cost_usd:.4f}' if message.total_cost_usd else 'N/A'
+            log(f'[{elapsed}s] Done: turns={message.num_turns}, cost={cost}, error={message.is_error}')
 
     # Print result to stdout so it appears in Fly logs
-    print('=== AGENT RESULT ===')
-    print(result[:10000])
-    print('=== END RESULT ===')
+    log('=== AGENT RESULT ===')
+    log(result[:10000])
+    log('=== END RESULT ===')
 
     # Detect branch and PR number from git/gh state
     import subprocess
