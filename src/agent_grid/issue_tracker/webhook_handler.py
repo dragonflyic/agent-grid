@@ -2,12 +2,16 @@
 
 import hashlib
 import hmac
+import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from ..config import settings
 from ..execution_grid import EventType, event_bus
+
+logger = logging.getLogger("agent_grid.webhook")
 
 webhook_router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -47,21 +51,29 @@ async def handle_github_webhook(
         if not verify_signature(payload, x_hub_signature_256, settings.github_webhook_secret):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
-    data = await request.json()
+    # Parse JSON from already-read payload (don't re-read stream with request.json())
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        logger.error(f"Failed to parse webhook JSON: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    # Handle different event types
-    if x_github_event == "issues":
-        await _handle_issue_event(data)
-    elif x_github_event == "issue_comment":
-        await _handle_issue_comment_event(data)
-    elif x_github_event == "pull_request_review":
-        await _handle_pr_review_event(data)
-    elif x_github_event == "pull_request_review_comment":
-        await _handle_pr_review_comment_event(data)
-    elif x_github_event == "pull_request":
-        await _handle_pr_event(data)
-    elif x_github_event == "ping":
-        return {"status": "pong"}
+    try:
+        if x_github_event == "issues":
+            await _handle_issue_event(data)
+        elif x_github_event == "issue_comment":
+            await _handle_issue_comment_event(data)
+        elif x_github_event == "pull_request_review":
+            await _handle_pr_review_event(data)
+        elif x_github_event == "pull_request_review_comment":
+            await _handle_pr_review_comment_event(data)
+        elif x_github_event == "pull_request":
+            await _handle_pr_event(data)
+        elif x_github_event == "ping":
+            return {"status": "pong"}
+    except Exception:
+        logger.exception(f"Error processing {x_github_event} webhook")
+        raise HTTPException(status_code=500, detail="Webhook processing failed")
 
     return {"status": "ok"}
 
@@ -72,8 +84,12 @@ async def _handle_issue_event(data: dict[str, Any]) -> None:
     issue = data.get("issue", {})
     repo = data.get("repository", {})
 
-    repo_full_name = repo.get("full_name", "")
+    repo_full_name = repo.get("full_name")
     issue_number = issue.get("number")
+
+    if not repo_full_name or issue_number is None:
+        logger.warning(f"Invalid issue event: repo={repo_full_name}, issue={issue_number}")
+        return
 
     if action == "opened":
         await event_bus.publish(
@@ -116,8 +132,11 @@ async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
     if action != "created":
         return
 
-    repo_full_name = repo.get("full_name", "")
+    repo_full_name = repo.get("full_name")
     issue_number = issue.get("number")
+
+    if not repo_full_name or issue_number is None:
+        return
     comment_body = comment.get("body", "")
     labels = [label["name"] for label in issue.get("labels", [])]
     is_pull_request = "pull_request" in issue

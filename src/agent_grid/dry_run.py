@@ -238,14 +238,47 @@ class DryRunDatabase:
     async def set_cron_state(self, key: str, value: dict) -> None:
         self._cron_state[key] = value
 
-    async def save_checkpoint(self, issue_id: str, checkpoint: dict) -> None:
-        self._checkpoints[issue_id] = checkpoint
+    async def save_checkpoint(self, execution_id: UUID, checkpoint: dict) -> None:
+        self._checkpoints[str(execution_id)] = checkpoint
 
     async def get_latest_checkpoint(self, issue_id: str) -> dict | None:
         return self._checkpoints.get(issue_id)
 
+    async def get_all_checkpoints(self, issue_id: str) -> list[dict]:
+        return []
+
     async def get_pending_nudges(self, limit: int = 10) -> list:
         return []
+
+    async def create_nudge(self, nudge) -> None:
+        pass
+
+    async def mark_nudge_processed(self, nudge_id: UUID) -> None:
+        pass
+
+    async def list_issue_states(self, repo: str, classification: str | None = None) -> list[dict]:
+        results = list(self._issue_states.values())
+        if repo:
+            results = [s for s in results if s.get("repo") == repo]
+        if classification:
+            results = [s for s in results if s.get("classification") == classification]
+        return results
+
+    async def update_execution_result(
+        self,
+        execution_id: UUID,
+        status=None,
+        result: str | None = None,
+        pr_number: int | None = None,
+        branch: str | None = None,
+        checkpoint: dict | None = None,
+    ) -> None:
+        if execution_id in self._executions:
+            execution = self._executions[execution_id]["execution"]
+            if status:
+                execution.status = status
+            if result:
+                execution.result = result
 
     async def record_budget_usage(self, **kwargs) -> None:
         pass
