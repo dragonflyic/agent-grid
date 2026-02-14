@@ -14,6 +14,7 @@ import asyncio
 import logging
 
 from ..config import settings
+from ..execution_grid import ExecutionStatus
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
 from ..issue_tracker.metadata import embed_metadata
@@ -151,8 +152,19 @@ class ManagementLoop:
 
         logger.info("=== Cron cycle complete ===")
 
+    async def _has_active_execution(self, issue_id: str) -> bool:
+        """Check if there's already a running/pending execution for this issue."""
+        existing = await self._db.get_execution_for_issue(issue_id)
+        if existing and existing.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
+            logger.info(f"Issue #{issue_id}: already has active execution {existing.id}, skipping")
+            return True
+        return False
+
     async def _launch_simple(self, repo: str, issue) -> None:
         """Launch an agent for a SIMPLE issue."""
+        if await self._has_active_execution(issue.id):
+            return
+
         from ..execution_grid import ExecutionConfig, get_execution_grid
 
         labels = get_label_manager()
@@ -189,6 +201,9 @@ class ManagementLoop:
 
     async def _launch_unblocked(self, repo: str, issue) -> None:
         """Launch an agent for a previously-blocked issue that got a human reply."""
+        if await self._has_active_execution(issue.id):
+            return
+
         from ..execution_grid import ExecutionConfig, get_execution_grid
         from ..issue_tracker.metadata import extract_metadata
 
@@ -238,6 +253,9 @@ class ManagementLoop:
 
     async def _launch_planner(self, repo: str, issue) -> None:
         """Launch an agent to decompose a COMPLEX issue into sub-issues."""
+        if await self._has_active_execution(issue.id):
+            return
+
         from ..execution_grid import ExecutionConfig, get_execution_grid
 
         labels = get_label_manager()
@@ -272,9 +290,11 @@ class ManagementLoop:
 
     async def _launch_review_handler(self, repo: str, pr_info: dict) -> None:
         """Launch an agent to address PR review comments."""
-        from ..execution_grid import ExecutionConfig, get_execution_grid
-
         issue_id = pr_info["issue_id"]
+        if await self._has_active_execution(issue_id):
+            return
+
+        from ..execution_grid import ExecutionConfig, get_execution_grid
         issue = await self._tracker.get_issue(repo, issue_id)
 
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
@@ -310,9 +330,11 @@ class ManagementLoop:
 
     async def _launch_retry(self, repo: str, pr_info: dict) -> None:
         """Launch a retry agent for a closed PR with feedback."""
-        from ..execution_grid import ExecutionConfig, get_execution_grid
-
         issue_id = pr_info["issue_id"]
+        if await self._has_active_execution(issue_id):
+            return
+
+        from ..execution_grid import ExecutionConfig, get_execution_grid
         issue = await self._tracker.get_issue(repo, issue_id)
 
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
