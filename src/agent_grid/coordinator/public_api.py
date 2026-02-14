@@ -203,6 +203,37 @@ async def cancel_execution(execution_id: UUID) -> dict[str, str]:
     return {"status": "cancelled", "execution_id": str(execution_id)}
 
 
+@coordinator_router.get("/issue-state/{issue_number}")
+async def get_issue_state(issue_number: int, repo: str | None = None) -> dict[str, Any]:
+    """Get issue state including metadata."""
+    from .database import get_database
+    from ..config import settings
+
+    db = get_database()
+    state = await db.get_issue_state(issue_number, repo or settings.target_repo)
+    if not state:
+        raise HTTPException(status_code=404, detail="Issue state not found")
+    return dict(state)
+
+
+@coordinator_router.post("/issue-state/{issue_number}/reset-ci")
+async def reset_ci_fix_count(issue_number: int, repo: str | None = None) -> dict[str, Any]:
+    """Reset the CI fix counter for an issue."""
+    from .database import get_database
+    from ..config import settings
+
+    db = get_database()
+    actual_repo = repo or settings.target_repo
+    state = await db.get_issue_state(issue_number, actual_repo)
+    if not state:
+        raise HTTPException(status_code=404, detail="Issue state not found")
+    metadata = state.get("metadata") or {}
+    metadata.pop("ci_fix_count", None)
+    metadata.pop("last_ci_check_sha", None)
+    await db.upsert_issue_state(issue_number=issue_number, repo=actual_repo, metadata=metadata)
+    return {"status": "reset", "issue_number": issue_number}
+
+
 @coordinator_router.get("/budget")
 async def get_budget_status() -> dict[str, Any]:
     """

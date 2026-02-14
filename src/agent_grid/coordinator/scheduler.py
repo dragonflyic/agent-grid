@@ -298,7 +298,7 @@ class Scheduler:
             logger.info(f"CI fix already attempted for SHA {head_sha[:8]}, skipping")
             return
 
-        # Check CI fix retry limit
+        # Check CI fix retry limit (max fix cycles per issue, resets on new non-agent commit)
         ci_fix_count = metadata.get("ci_fix_count", 0)
         if ci_fix_count >= settings.max_ci_fix_retries:
             logger.warning(f"Issue #{issue_id}: CI fix retry limit ({settings.max_ci_fix_retries}) reached")
