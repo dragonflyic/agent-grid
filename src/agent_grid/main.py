@@ -56,9 +56,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await event_bus.start()
     logger.info("Event bus started")
 
-    # Start database connection in background (don't block health checks)
+    # Connect database before starting services that depend on it
     db = get_database()
-    db_task = asyncio.create_task(_connect_database_background(db, logger))
+    await _connect_database_background(db, logger)
 
     # Start scheduler
     scheduler = get_scheduler()
@@ -95,13 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         fly_client = get_fly_client()
         await fly_client.close()
 
-    # Wait for db connection task and close if connected
-    if not db_task.done():
-        db_task.cancel()
-        try:
-            await db_task
-        except asyncio.CancelledError:
-            pass
+    # Close database connection
     if db._pool is not None:
         await db.close()
 

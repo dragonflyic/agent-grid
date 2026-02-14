@@ -30,7 +30,10 @@ class EventBus:
             timestamp=utc_now(),
             payload=payload or {},
         )
-        await self._queue.put(event)
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            logger.error(f"Event bus queue full ({self._queue.maxsize}), dropping event: {event_type}")
 
     def subscribe(
         self,

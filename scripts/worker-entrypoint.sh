@@ -76,7 +76,11 @@ async def main():
 
     # Report back to orchestrator
     import httpx
-    callback_url = os.environ.get('ORCHESTRATOR_URL', '') + '/api/agent-status'
+    orchestrator = os.environ.get('ORCHESTRATOR_URL', '')
+    if not orchestrator:
+        print('Warning: ORCHESTRATOR_URL not set, skipping callback')
+        return
+    callback_url = orchestrator + '/api/agent-status'
     payload = {
         'execution_id': os.environ['EXECUTION_ID'],
         'status': 'completed',
@@ -110,7 +114,11 @@ import asyncio, os
 import httpx
 
 async def report_failure():
-    callback_url = os.environ.get('ORCHESTRATOR_URL', '') + '/api/agent-status'
+    orchestrator = os.environ.get('ORCHESTRATOR_URL', '')
+    if not orchestrator:
+        print('Warning: ORCHESTRATOR_URL not set, skipping callback')
+        return
+    callback_url = orchestrator + '/api/agent-status'
     payload = {
         'execution_id': os.environ['EXECUTION_ID'],
         'status': 'failed',

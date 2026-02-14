@@ -117,6 +117,12 @@ class PRMonitor:
                 pr_body = pr.get("body", "") or ""
                 issue_id = self._extract_issue_from_branch(head_branch) or self._extract_issue_number(pr_body)
 
+                if not issue_id:
+                    logger.warning(
+                        f"PR #{pr_number}: cannot extract issue from branch '{head_branch}' or body, skipping"
+                    )
+                    continue
+
                 prs_needing_attention.append(
                     {
                         "pr_number": pr_number,
@@ -193,6 +199,12 @@ class PRMonitor:
 
             pr_body = pr.get("body", "") or ""
             issue_id = self._extract_issue_from_branch(head_branch) or self._extract_issue_number(pr_body)
+
+            if not issue_id:
+                logger.warning(
+                    f"Closed PR #{pr_number}: cannot extract issue from branch '{head_branch}' or body, skipping"
+                )
+                continue
 
             prs_with_feedback.append(
                 {

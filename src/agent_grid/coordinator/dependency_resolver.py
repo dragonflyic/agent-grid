@@ -35,8 +35,11 @@ class DependencyResolver:
                     if blocker.status != IssueStatus.CLOSED:
                         all_deps_resolved = False
                         break
-                except Exception:
-                    continue
+                except Exception as e:
+                    # Can't verify blocker status — assume still blocked
+                    logger.warning(f"Cannot fetch blocker #{blocker_id} for issue #{issue.number}: {e}")
+                    all_deps_resolved = False
+                    break
 
             if all_deps_resolved:
                 await self._labels.remove_label(repo, issue.id, "ag/waiting")
