@@ -56,6 +56,12 @@ variable "target_repo" {
   default     = ""
 }
 
+variable "coordinator_url" {
+  description = "Public URL of the coordinator API (for worker callbacks)"
+  type        = string
+  default     = ""
+}
+
 variable "fly_app_name" {
   description = "Fly.io app name for worker machines"
   type        = string

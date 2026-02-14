@@ -61,7 +61,7 @@ class FlyMachinesClient:
                     "CONTEXT_JSON": context_json,
                     "ANTHROPIC_API_KEY": settings.anthropic_api_key,
                     "GITHUB_TOKEN": settings.github_token,
-                    "ORCHESTRATOR_URL": f"https://{self._app_name}.fly.dev",
+                    "ORCHESTRATOR_URL": settings.coordinator_url or f"https://{self._app_name}.fly.dev",
                     "AGENT_BYPASS_PERMISSIONS": "true",
                 },
                 "guest": {

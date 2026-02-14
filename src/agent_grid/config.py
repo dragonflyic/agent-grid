@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     fly_worker_cpus: int = 2
     fly_worker_memory_mb: int = 4096
     fly_worker_region: str = "iad"
+    coordinator_url: str = ""  # Public URL where workers can reach the coordinator API
 
     # Anthropic API (for classification/planning)
     anthropic_api_key: str = ""
