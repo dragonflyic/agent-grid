@@ -96,13 +96,16 @@ class PRMonitor:
             # Filter for new comments since last check
             new_reviews = []
             for review in reviews:
-                if review.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and review.get("body"):
-                    if not last_check or _normalize_timestamp(review.get("submitted_at", "")) > _normalize_timestamp(last_check):
+                is_actionable = review.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
+                if is_actionable and review.get("body"):
+                    submitted = _normalize_timestamp(review.get("submitted_at", ""))
+                    if not last_check or submitted > _normalize_timestamp(last_check):
                         new_reviews.append(review["body"])
 
             new_comments = []
             for comment in pr_comments:
-                if not last_check or _normalize_timestamp(comment.get("created_at", "")) > _normalize_timestamp(last_check):
+                created = _normalize_timestamp(comment.get("created_at", ""))
+                if not last_check or created > _normalize_timestamp(last_check):
                     path = comment.get("path", "")
                     body = comment.get("body", "")
                     new_comments.append(f"File: {path}\n{body}")

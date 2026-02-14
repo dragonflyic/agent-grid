@@ -209,7 +209,6 @@ class Scheduler:
         match = re.match(r"agent/(\d+)", branch)
         if not match:
             return
-        issue_id = match.group(1)
 
         # Use PR monitor to get the full review comments
         from .pr_monitor import get_pr_monitor
