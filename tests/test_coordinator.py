@@ -85,6 +85,36 @@ class TestBudgetManager:
         assert settings.max_concurrent_executions > 0
 
 
+class TestPRMonitorTimestamps:
+    """Tests for PR monitor timestamp normalization."""
+
+    def test_normalize_strips_z_suffix(self):
+        """GitHub Z suffix should be stripped for comparison."""
+        from agent_grid.coordinator.pr_monitor import _normalize_timestamp
+
+        assert _normalize_timestamp("2026-02-14T15:35:22Z") == "2026-02-14T15:35:22"
+
+    def test_normalize_strips_microseconds(self):
+        """Python microseconds should be stripped for comparison."""
+        from agent_grid.coordinator.pr_monitor import _normalize_timestamp
+
+        assert _normalize_timestamp("2026-02-14T15:30:00.123456") == "2026-02-14T15:30:00"
+
+    def test_normalized_timestamps_compare_correctly(self):
+        """Normalized timestamps should compare correctly regardless of source format."""
+        from agent_grid.coordinator.pr_monitor import _normalize_timestamp
+
+        github_ts = "2026-02-14T15:35:22Z"
+        python_ts = "2026-02-14T15:30:00.123456"
+        assert _normalize_timestamp(github_ts) > _normalize_timestamp(python_ts)
+
+    def test_normalize_empty_string(self):
+        """Empty string should return empty string."""
+        from agent_grid.coordinator.pr_monitor import _normalize_timestamp
+
+        assert _normalize_timestamp("") == ""
+
+
 class TestScheduler:
     """Tests for Scheduler logic."""
 

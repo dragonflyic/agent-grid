@@ -13,6 +13,21 @@ from .database import get_database
 logger = logging.getLogger("agent_grid.pr_monitor")
 
 
+def _normalize_timestamp(ts: str) -> str:
+    """Normalize ISO timestamp for reliable string comparison.
+
+    Strips Z suffix, +00:00 timezone, and microseconds so that
+    GitHub timestamps ("2026-02-14T15:35:22Z") and Python isoformat
+    timestamps ("2026-02-14T15:30:00.123456") compare correctly.
+    """
+    if not ts:
+        return ""
+    ts = ts.replace("Z", "").replace("+00:00", "")
+    if "." in ts:
+        ts = ts.split(".")[0]
+    return ts
+
+
 class PRMonitor:
     """Watches agent-created PRs for human review comments."""
 
@@ -82,12 +97,12 @@ class PRMonitor:
             new_reviews = []
             for review in reviews:
                 if review.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and review.get("body"):
-                    if not last_check or review.get("submitted_at", "") > last_check:
+                    if not last_check or _normalize_timestamp(review.get("submitted_at", "")) > _normalize_timestamp(last_check):
                         new_reviews.append(review["body"])
 
             new_comments = []
             for comment in pr_comments:
-                if not last_check or comment.get("created_at", "") > last_check:
+                if not last_check or _normalize_timestamp(comment.get("created_at", "")) > _normalize_timestamp(last_check):
                     path = comment.get("path", "")
                     body = comment.get("body", "")
                     new_comments.append(f"File: {path}\n{body}")
@@ -111,7 +126,7 @@ class PRMonitor:
         # Update last check timestamp
         await self._db.set_cron_state(
             "last_pr_check",
-            {"timestamp": datetime.utcnow().isoformat()},
+            {"timestamp": _normalize_timestamp(datetime.utcnow().isoformat())},
         )
 
         return prs_needing_attention
@@ -153,7 +168,7 @@ class PRMonitor:
             pr_number = pr["number"]
             closed_at = pr.get("closed_at", "")
 
-            if last_check and closed_at <= last_check:
+            if last_check and _normalize_timestamp(closed_at) <= _normalize_timestamp(last_check):
                 continue
 
             # Get comments after close
@@ -185,7 +200,7 @@ class PRMonitor:
 
         await self._db.set_cron_state(
             "last_closed_pr_check",
-            {"timestamp": datetime.utcnow().isoformat()},
+            {"timestamp": _normalize_timestamp(datetime.utcnow().isoformat())},
         )
 
         return prs_with_feedback
