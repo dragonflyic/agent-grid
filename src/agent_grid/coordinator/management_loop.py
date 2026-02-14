@@ -367,6 +367,43 @@ class ManagementLoop:
             )
             logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent")
 
+    async def _launch_ci_fix(self, repo: str, check_info: dict) -> None:
+        """Launch an agent to fix a failing CI check on an agent PR."""
+        import re
+
+        branch = check_info.get("branch", "")
+        match = re.match(r"agent/(\d+)(?:-|$)", branch)
+        if not match:
+            return
+        issue_id = match.group(1)
+
+        if await self._has_active_execution(issue_id):
+            return
+
+        issue = await self._tracker.get_issue(repo, issue_id)
+        checkpoint = await self._db.get_latest_checkpoint(issue_id)
+
+        context = {
+            "existing_branch": branch,
+            "pr_number": check_info.get("pr_number"),
+            "check_name": check_info.get("check_name", ""),
+            "check_output": check_info.get("check_output", ""),
+            "check_url": check_info.get("check_url", ""),
+        }
+
+        prompt = build_prompt(issue, repo, mode="fix_ci", context=context, checkpoint=checkpoint)
+
+        launched = await self._claim_and_launch(
+            issue_id=issue_id,
+            repo_url=f"https://github.com/{repo}.git",
+            prompt=prompt,
+            mode="fix_ci",
+            issue_number=int(issue_id),
+            context=context,
+        )
+        if launched:
+            logger.info(f"Issue #{issue_id}: launched CI fix agent for '{check_info.get('check_name')}'")
+
     async def _check_in_progress(self, repo: str) -> None:
         """Phase 4: Check in-progress executions for timeouts."""
         from ..execution_grid import ExecutionStatus

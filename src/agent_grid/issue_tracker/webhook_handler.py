@@ -69,6 +69,8 @@ async def handle_github_webhook(
             await _handle_pr_review_comment_event(data)
         elif x_github_event == "pull_request":
             await _handle_pr_event(data)
+        elif x_github_event == "check_run":
+            await _handle_check_run_event(data)
         elif x_github_event == "ping":
             return {"status": "pong"}
     except Exception:
@@ -232,3 +234,57 @@ async def _handle_pr_event(data: dict[str, Any]) -> None:
             "merged": merged,
         },
     )
+
+
+async def _handle_check_run_event(data: dict[str, Any]) -> None:
+    """Handle check_run completion — detect CI failures on agent PRs."""
+    action = data.get("action")
+    if action != "completed":
+        return
+
+    check_run = data.get("check_run", {})
+    conclusion = check_run.get("conclusion")
+
+    if conclusion not in ("failure", "timed_out"):
+        return
+
+    # Get associated PRs — only care about agent branches
+    pull_requests = check_run.get("pull_requests", [])
+    if not pull_requests:
+        return
+
+    pr = pull_requests[0]
+    head_branch = pr.get("head", {}).get("ref", "")
+    if not head_branch.startswith("agent/"):
+        return
+
+    head_sha = pr.get("head", {}).get("sha", "")
+    repo = data.get("repository", {}).get("full_name", "")
+
+    if not repo:
+        return
+
+    # Build output from check_run.output fields
+    output = check_run.get("output", {})
+    check_output_parts = []
+    if output.get("title"):
+        check_output_parts.append(output["title"])
+    if output.get("summary"):
+        check_output_parts.append(output["summary"])
+    if output.get("text"):
+        check_output_parts.append(output["text"])
+    check_output = "\n\n".join(check_output_parts)
+
+    await event_bus.publish(
+        EventType.CHECK_RUN_FAILED,
+        {
+            "repo": repo,
+            "pr_number": pr.get("number"),
+            "branch": head_branch,
+            "head_sha": head_sha,
+            "check_name": check_run.get("name", ""),
+            "check_output": check_output[:3000],
+            "check_url": check_run.get("html_url", ""),
+        },
+    )
+    logger.info(f"CI check '{check_run.get('name')}' failed on {head_branch} — published CHECK_RUN_FAILED")

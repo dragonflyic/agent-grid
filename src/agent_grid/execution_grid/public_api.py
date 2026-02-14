@@ -58,6 +58,7 @@ class EventType(str, Enum):
     NUDGE_REQUESTED = "nudge.requested"
     PR_REVIEW = "pr.review"
     PR_CLOSED = "pr.closed"
+    CHECK_RUN_FAILED = "check_run.failed"
 
 
 class Event(BaseModel):
