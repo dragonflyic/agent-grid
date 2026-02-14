@@ -187,7 +187,7 @@ class ManagementLoop:
         grid = get_execution_grid()
         try:
             if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
-                kwargs: dict = {"mode": mode}
+                kwargs: dict = {"mode": mode, "execution_id": execution_id}
                 if issue_number is not None:
                     kwargs["issue_number"] = issue_number
                 if context is not None:

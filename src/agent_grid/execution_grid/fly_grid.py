@@ -45,9 +45,10 @@ class FlyExecutionGrid(ExecutionGrid):
         mode: str = "implement",
         issue_number: int | None = None,
         context: dict | None = None,
+        execution_id: UUID | None = None,
     ) -> UUID:
         """Launch an agent on an ephemeral Fly Machine."""
-        execution_id = uuid4()
+        execution_id = execution_id or uuid4()
 
         execution = AgentExecution(
             id=execution_id,
