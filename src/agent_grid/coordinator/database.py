@@ -341,7 +341,7 @@ class Database:
             parent_issue,
             sub_issues,
             retry_count,
-            json.dumps(metadata) if metadata else None,
+            json.dumps(metadata) if metadata is not None else None,
         )
 
     async def get_issue_state(self, issue_number: int, repo: str) -> dict | None:
