@@ -186,6 +186,23 @@ async def agent_status_callback(body: AgentStatusCallback) -> dict[str, str]:
     return {"status": "ok"}
 
 
+@coordinator_router.post("/executions/{execution_id}/cancel")
+async def cancel_execution(execution_id: UUID) -> dict[str, str]:
+    """Mark an execution as failed (e.g. after manually killing a machine)."""
+    from .database import get_database
+
+    db = get_database()
+    execution = await db.get_execution(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    if execution.status not in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
+        raise HTTPException(status_code=400, detail=f"Execution is already {execution.status}")
+    execution.status = ExecutionStatus.FAILED
+    execution.result = "Manually cancelled"
+    await db.update_execution(execution)
+    return {"status": "cancelled", "execution_id": str(execution_id)}
+
+
 @coordinator_router.get("/budget")
 async def get_budget_status() -> dict[str, Any]:
     """
