@@ -5,6 +5,8 @@ Manages ag/* labels on GitHub issues to track pipeline state.
 
 import logging
 
+import httpx
+
 from .github_client import GitHubClient
 from .public_api import get_issue_tracker
 
@@ -74,12 +76,18 @@ class LabelManager:
         }
         for label, color in label_colors.items():
             try:
-                await self._github._client.post(
+                resp = await self._github._client.post(
                     f"/repos/{repo}/labels",
                     json={"name": label, "color": color},
                 )
-            except Exception:
-                pass  # Label already exists
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 422:
+                    pass  # Label already exists
+                else:
+                    logger.warning(f"Failed to create label {label}: {e.response.status_code}")
+            except Exception as e:
+                logger.error(f"Error creating label {label}: {e}")
 
 
 _label_manager: LabelManager | None = None

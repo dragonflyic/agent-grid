@@ -67,10 +67,16 @@ class BlockerResolver:
         if last_block_idx is None:
             return False
 
-        # Check if any comment after it is from a human (no agent metadata)
+        # Check if any comment after it is from a human (no agent metadata
+        # and not a bot account)
         for comment in comments[last_block_idx + 1 :]:
-            if extract_metadata(comment.body) is None:
-                return True
+            if extract_metadata(comment.body) is not None:
+                continue  # Agent-generated comment
+            if comment.author_type == "Bot":
+                continue  # GitHub App / bot account
+            if comment.author and comment.author.endswith("[bot]"):
+                continue  # Bot with [bot] suffix
+            return True
 
         return False
 

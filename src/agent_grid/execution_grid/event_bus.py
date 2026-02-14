@@ -1,10 +1,13 @@
 """In-memory SQS-compatible event bus."""
 
 import asyncio
+import logging
 from typing import Awaitable, Callable
 
 from ..config import settings
 from .public_api import Event, EventType, utc_now
+
+logger = logging.getLogger("agent_grid.event_bus")
 
 
 class EventBus:
@@ -27,7 +30,10 @@ class EventBus:
             timestamp=utc_now(),
             payload=payload or {},
         )
-        await self._queue.put(event)
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            logger.error(f"Event bus queue full ({self._queue.maxsize}), dropping event: {event_type}")
 
     def subscribe(
         self,
@@ -66,25 +72,36 @@ class EventBus:
         if None in self._subscribers:
             handlers.extend(self._subscribers[None])
 
-        # Run all handlers concurrently
+        # Run all handlers concurrently, log any errors
         if handlers:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 *[handler(event) for handler in handlers],
                 return_exceptions=True,
             )
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"Event handler failed for {event.type}: {result}",
+                        exc_info=result,
+                    )
 
     async def _consume_loop(self) -> None:
         """Main consumer loop that processes events from the queue."""
         while self._running:
             try:
                 event = await asyncio.wait_for(self._queue.get(), timeout=1.0)
-                await self._dispatch(event)
-                self._queue.task_done()
+                try:
+                    await self._dispatch(event)
+                except Exception:
+                    logger.exception(f"Error dispatching event {event.type}")
+                finally:
+                    self._queue.task_done()
             except asyncio.TimeoutError:
                 continue
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                # Log error but continue processing
-                continue
+                logger.exception("Unexpected error in event bus consumer loop")
 
     async def start(self) -> None:
         """Start the event bus consumer."""

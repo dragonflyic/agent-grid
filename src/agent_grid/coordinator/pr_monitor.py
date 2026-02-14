@@ -13,6 +13,21 @@ from .database import get_database
 logger = logging.getLogger("agent_grid.pr_monitor")
 
 
+def _normalize_timestamp(ts: str) -> str:
+    """Normalize ISO timestamp for reliable string comparison.
+
+    Strips Z suffix, +00:00 timezone, and microseconds so that
+    GitHub timestamps ("2026-02-14T15:35:22Z") and Python isoformat
+    timestamps ("2026-02-14T15:30:00.123456") compare correctly.
+    """
+    if not ts:
+        return ""
+    ts = ts.replace("Z", "").replace("+00:00", "")
+    if "." in ts:
+        ts = ts.split(".")[0]
+    return ts
+
+
 class PRMonitor:
     """Watches agent-created PRs for human review comments."""
 
@@ -20,7 +35,7 @@ class PRMonitor:
         self._tracker = get_issue_tracker()
         self._db = get_database()
 
-    async def check_prs(self, repo: str) -> list[dict]:
+    async def check_prs(self, repo: str, update_timestamp: bool = True) -> list[dict]:
         """Check all agent PRs for new review comments.
 
         Returns list of PRs that need review handling:
@@ -81,13 +96,16 @@ class PRMonitor:
             # Filter for new comments since last check
             new_reviews = []
             for review in reviews:
-                if review.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and review.get("body"):
-                    if not last_check or review.get("submitted_at", "") > last_check:
+                is_actionable = review.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
+                if is_actionable and review.get("body"):
+                    submitted = _normalize_timestamp(review.get("submitted_at", ""))
+                    if not last_check or submitted > _normalize_timestamp(last_check):
                         new_reviews.append(review["body"])
 
             new_comments = []
             for comment in pr_comments:
-                if not last_check or comment.get("created_at", "") > last_check:
+                created = _normalize_timestamp(comment.get("created_at", ""))
+                if not last_check or created > _normalize_timestamp(last_check):
                     path = comment.get("path", "")
                     body = comment.get("body", "")
                     new_comments.append(f"File: {path}\n{body}")
@@ -99,6 +117,12 @@ class PRMonitor:
                 pr_body = pr.get("body", "") or ""
                 issue_id = self._extract_issue_from_branch(head_branch) or self._extract_issue_number(pr_body)
 
+                if not issue_id:
+                    logger.warning(
+                        f"PR #{pr_number}: cannot extract issue from branch '{head_branch}' or body, skipping"
+                    )
+                    continue
+
                 prs_needing_attention.append(
                     {
                         "pr_number": pr_number,
@@ -108,11 +132,13 @@ class PRMonitor:
                     }
                 )
 
-        # Update last check timestamp
-        await self._db.set_cron_state(
-            "last_pr_check",
-            {"timestamp": datetime.utcnow().isoformat()},
-        )
+        # Update last check timestamp (skip when called from webhook to avoid
+        # advancing the cursor and causing the cron loop to miss reviews)
+        if update_timestamp:
+            await self._db.set_cron_state(
+                "last_pr_check",
+                {"timestamp": _normalize_timestamp(datetime.utcnow().isoformat())},
+            )
 
         return prs_needing_attention
 
@@ -153,7 +179,7 @@ class PRMonitor:
             pr_number = pr["number"]
             closed_at = pr.get("closed_at", "")
 
-            if last_check and closed_at <= last_check:
+            if last_check and _normalize_timestamp(closed_at) <= _normalize_timestamp(last_check):
                 continue
 
             # Get comments after close
@@ -174,6 +200,12 @@ class PRMonitor:
             pr_body = pr.get("body", "") or ""
             issue_id = self._extract_issue_from_branch(head_branch) or self._extract_issue_number(pr_body)
 
+            if not issue_id:
+                logger.warning(
+                    f"Closed PR #{pr_number}: cannot extract issue from branch '{head_branch}' or body, skipping"
+                )
+                continue
+
             prs_with_feedback.append(
                 {
                     "pr_number": pr_number,
@@ -185,16 +217,16 @@ class PRMonitor:
 
         await self._db.set_cron_state(
             "last_closed_pr_check",
-            {"timestamp": datetime.utcnow().isoformat()},
+            {"timestamp": _normalize_timestamp(datetime.utcnow().isoformat())},
         )
 
         return prs_with_feedback
 
     def _extract_issue_from_branch(self, branch: str) -> str | None:
-        """Extract issue number from agent branch name (agent/42 or agent/42-retry)."""
+        """Extract issue number from agent branch name (agent/42, agent/42-retry, etc)."""
         import re
 
-        match = re.match(r"agent/(\d+)", branch)
+        match = re.match(r"agent/(\d+)(?:-|$)", branch)
         return match.group(1) if match else None
 
     def _extract_issue_number(self, pr_body: str) -> str | None:

@@ -70,6 +70,43 @@ class Database:
             execution.created_at,
         )
 
+    async def try_claim_issue(self, execution: AgentExecution, issue_id: str) -> bool:
+        """Atomically claim an issue for execution, preventing duplicates.
+
+        Returns True if the claim succeeded (no other active execution exists).
+        Returns False if another pending/running execution already exists.
+
+        Uses both WHERE NOT EXISTS check and the partial unique index
+        (idx_executions_active_issue) as a safety net for concurrent claims.
+        """
+        pool = await self._get_pool()
+        try:
+            result = await pool.fetchval(
+                """
+                INSERT INTO executions
+                (id, issue_id, repo_url, status, prompt, result, started_at, completed_at, created_at)
+                SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM executions
+                    WHERE issue_id = $2 AND status IN ('pending', 'running')
+                )
+                RETURNING id
+                """,
+                execution.id,
+                issue_id,
+                execution.repo_url,
+                execution.status.value,
+                execution.prompt,
+                execution.result,
+                execution.started_at,
+                execution.completed_at,
+                execution.created_at,
+            )
+            return result is not None
+        except asyncpg.UniqueViolationError:
+            # Partial unique index caught a concurrent claim race
+            return False
+
     async def update_execution(self, execution: AgentExecution) -> None:
         """Update an existing execution record."""
         pool = await self._get_pool()
@@ -147,6 +184,15 @@ class Database:
         if row:
             return self._row_to_execution(row)
         return None
+
+    async def get_issue_id_for_execution(self, execution_id: UUID) -> str | None:
+        """Get the issue_id associated with an execution."""
+        pool = await self._get_pool()
+        row = await pool.fetchrow(
+            "SELECT issue_id FROM executions WHERE id = $1",
+            execution_id,
+        )
+        return row["issue_id"] if row else None
 
     def _row_to_execution(self, row: asyncpg.Record) -> AgentExecution:
         """Convert a database row to an AgentExecution."""

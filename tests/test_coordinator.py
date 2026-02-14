@@ -30,6 +30,51 @@ class TestNudgeRequest:
         assert nudge.source_execution_id == source_id
 
 
+class TestScanner:
+    """Tests for Scanner filtering logic."""
+
+    def test_handled_labels_includes_epic(self):
+        """ag/epic issues must not be re-scanned."""
+        from agent_grid.coordinator.scanner import HANDLED_LABELS
+
+        assert "ag/epic" in HANDLED_LABELS
+
+    def test_handled_labels_includes_sub_issue(self):
+        """ag/sub-issue issues must not be re-scanned."""
+        from agent_grid.coordinator.scanner import HANDLED_LABELS
+
+        assert "ag/sub-issue" in HANDLED_LABELS
+
+    def test_handled_labels_covers_all_non_todo_states(self):
+        """Every ag/* label except ag/todo should be in HANDLED_LABELS."""
+        from agent_grid.coordinator.scanner import HANDLED_LABELS
+        from agent_grid.issue_tracker.label_manager import AG_LABELS
+
+        # ag/todo is the only label that should trigger processing
+        non_actionable = AG_LABELS - {"ag/todo"}
+        assert non_actionable == HANDLED_LABELS
+
+
+class TestDatabaseMethods:
+    """Tests for Database method completeness."""
+
+    def test_get_issue_id_for_execution_exists(self):
+        """Database must have get_issue_id_for_execution — scheduler.py:124 calls it."""
+        from agent_grid.coordinator.database import Database
+
+        assert hasattr(Database, "get_issue_id_for_execution")
+
+    def test_get_issue_id_for_execution_signature(self):
+        """get_issue_id_for_execution must accept execution_id parameter."""
+        import inspect
+
+        from agent_grid.coordinator.database import Database
+
+        sig = inspect.signature(Database.get_issue_id_for_execution)
+        params = list(sig.parameters.keys())
+        assert "execution_id" in params
+
+
 class TestBudgetManager:
     """Tests for BudgetManager logic."""
 
@@ -38,6 +83,36 @@ class TestBudgetManager:
         from agent_grid.config import settings
 
         assert settings.max_concurrent_executions > 0
+
+
+class TestPRMonitorTimestamps:
+    """Tests for PR monitor timestamp normalization."""
+
+    def test_normalize_strips_z_suffix(self):
+        """GitHub Z suffix should be stripped for comparison."""
+        from agent_grid.coordinator.pr_monitor import _normalize_timestamp
+
+        assert _normalize_timestamp("2026-02-14T15:35:22Z") == "2026-02-14T15:35:22"
+
+    def test_normalize_strips_microseconds(self):
+        """Python microseconds should be stripped for comparison."""
+        from agent_grid.coordinator.pr_monitor import _normalize_timestamp
+
+        assert _normalize_timestamp("2026-02-14T15:30:00.123456") == "2026-02-14T15:30:00"
+
+    def test_normalized_timestamps_compare_correctly(self):
+        """Normalized timestamps should compare correctly regardless of source format."""
+        from agent_grid.coordinator.pr_monitor import _normalize_timestamp
+
+        github_ts = "2026-02-14T15:35:22Z"
+        python_ts = "2026-02-14T15:30:00.123456"
+        assert _normalize_timestamp(github_ts) > _normalize_timestamp(python_ts)
+
+    def test_normalize_empty_string(self):
+        """Empty string should return empty string."""
+        from agent_grid.coordinator.pr_monitor import _normalize_timestamp
+
+        assert _normalize_timestamp("") == ""
 
 
 class TestScheduler:

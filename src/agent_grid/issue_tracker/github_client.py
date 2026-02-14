@@ -86,10 +86,13 @@ class GitHubClient(IssueTracker):
 
             for item in data:
                 created_at = datetime.fromisoformat(item["created_at"].replace("Z", "+00:00"))
+                user = item.get("user") or {}
                 comments.append(
                     Comment(
                         id=str(item["id"]),
                         body=item["body"] or "",
+                        author=user.get("login", ""),
+                        author_type=user.get("type", ""),
                         created_at=created_at,
                     )
                 )

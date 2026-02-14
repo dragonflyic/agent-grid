@@ -22,6 +22,8 @@ HANDLED_LABELS = {
     "ag/done",
     "ag/failed",
     "ag/skipped",
+    "ag/epic",
+    "ag/sub-issue",
 }
 
 AG_PREFIX = "ag/"
