@@ -285,6 +285,7 @@ async def _handle_check_run_event(data: dict[str, Any]) -> None:
             "check_name": check_run.get("name", ""),
             "check_output": check_output[:3000],
             "check_url": check_run.get("html_url", ""),
+            "job_id": check_run.get("id"),  # Actions job ID for log download
         },
     )
     logger.info(f"CI check '{check_run.get('name')}' failed on {head_branch} — published CHECK_RUN_FAILED")

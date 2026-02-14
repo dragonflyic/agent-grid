@@ -330,6 +330,28 @@ class GitHubClient(IssueTracker):
 
         return False
 
+    async def get_actions_job_logs(self, repo: str, job_id: int) -> str:
+        """Download logs for a GitHub Actions job.
+
+        The Actions API returns a 302 redirect to a log download URL.
+        We follow the redirect and return the log text, truncated to
+        the last ~3000 chars (the tail is most useful for build errors).
+        """
+        try:
+            response = await self._client.get(
+                f"/repos/{repo}/actions/jobs/{job_id}/logs",
+                follow_redirects=True,
+            )
+            if response.status_code == 200:
+                logs = response.text
+                # Return tail — build errors are at the end
+                if len(logs) > 3000:
+                    return f"... (truncated)\n{logs[-3000:]}"
+                return logs
+        except Exception:
+            pass
+        return ""
+
     async def close(self) -> None:
         """Close the HTTP client."""
         await self._client.aclose()
