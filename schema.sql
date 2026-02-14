@@ -34,4 +34,5 @@ CREATE TABLE budget_usage (
 
 CREATE INDEX idx_executions_status ON executions(status);
 CREATE INDEX idx_executions_issue ON executions(issue_id);
+CREATE UNIQUE INDEX idx_executions_active_issue ON executions(issue_id) WHERE status IN ('pending', 'running');
 CREATE INDEX idx_nudge_queue_pending ON nudge_queue(processed_at) WHERE processed_at IS NULL;

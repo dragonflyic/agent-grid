@@ -12,9 +12,10 @@ Runs every N seconds (default 1 hour). Each cycle performs 7 phases:
 
 import asyncio
 import logging
+from uuid import uuid4
 
 from ..config import settings
-from ..execution_grid import ExecutionStatus, utc_now
+from ..execution_grid import AgentExecution, ExecutionConfig, ExecutionStatus, get_execution_grid, utc_now
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
 from ..issue_tracker.metadata import embed_metadata
@@ -152,6 +153,57 @@ class ManagementLoop:
 
         logger.info("=== Cron cycle complete ===")
 
+    async def _claim_and_launch(
+        self,
+        issue_id: str,
+        repo_url: str,
+        prompt: str,
+        mode: str = "implement",
+        issue_number: int | None = None,
+        context: dict | None = None,
+    ) -> bool:
+        """Atomically claim an issue and launch the agent.
+
+        Claims the DB row FIRST to prevent races, then launches the Fly machine.
+        If launch fails, the execution is marked as FAILED.
+
+        Returns True if the agent was launched, False if claim failed.
+        """
+        execution_id = uuid4()
+        execution = AgentExecution(
+            id=execution_id,
+            repo_url=repo_url,
+            status=ExecutionStatus.PENDING,
+            prompt=prompt,
+            started_at=utc_now(),
+        )
+
+        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
+        if not claimed:
+            logger.info(f"Issue #{issue_id}: already has active execution, skipping")
+            return False
+
+        config = ExecutionConfig(repo_url=repo_url, prompt=prompt)
+        grid = get_execution_grid()
+        try:
+            if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
+                kwargs: dict = {"mode": mode}
+                if issue_number is not None:
+                    kwargs["issue_number"] = issue_number
+                if context is not None:
+                    kwargs["context"] = context
+                await grid.launch_agent(config, **kwargs)
+            else:
+                await grid.launch_agent(config)
+        except Exception as e:
+            logger.error(f"Failed to launch agent for issue #{issue_id}: {e}")
+            execution.status = ExecutionStatus.FAILED
+            execution.result = f"Launch failed: {e}"
+            await self._db.update_execution(execution)
+            return False
+
+        return True
+
     async def _has_active_execution(self, issue_id: str) -> bool:
         """Check if there's already a running/pending execution for this issue."""
         existing = await self._db.get_execution_for_issue(issue_id)
@@ -165,50 +217,27 @@ class ManagementLoop:
         if await self._has_active_execution(issue.id):
             return
 
-        from ..execution_grid import ExecutionConfig, get_execution_grid
-
         labels = get_label_manager()
         await labels.transition_to(repo, issue.id, "ag/in-progress")
 
         prompt = build_prompt(issue, repo, mode="implement")
-        config = ExecutionConfig(
-            repo_url=f"https://github.com/{repo}.git",
+        repo_url = f"https://github.com/{repo}.git"
+
+        launched = await self._claim_and_launch(
+            issue_id=issue.id,
+            repo_url=repo_url,
             prompt=prompt,
+            mode="implement",
+            issue_number=issue.number,
         )
-
-        grid = get_execution_grid()
-        # Use the extended launch_agent if Fly grid (supports mode/issue_number)
-        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
-            execution_id = await grid.launch_agent(
-                config,
-                mode="implement",
-                issue_number=issue.number,
-            )
-        else:
-            execution_id = await grid.launch_agent(config)
-
-        # Record in DB atomically (prevents duplicate launches)
-        from ..execution_grid import AgentExecution, ExecutionStatus
-
-        execution = AgentExecution(
-            id=execution_id,
-            repo_url=config.repo_url,
-            status=ExecutionStatus.PENDING,
-            prompt=prompt,
-            started_at=utc_now(),
-        )
-        claimed = await self._db.try_claim_issue(execution, issue_id=issue.id)
-        if not claimed:
-            logger.info(f"Issue #{issue.number}: lost claim race, skipping")
-            return
-        logger.info(f"Issue #{issue.number}: SIMPLE — launched agent {execution_id}")
+        if launched:
+            logger.info(f"Issue #{issue.number}: SIMPLE — launched agent")
 
     async def _launch_unblocked(self, repo: str, issue) -> None:
         """Launch an agent for a previously-blocked issue that got a human reply."""
         if await self._has_active_execution(issue.id):
             return
 
-        from ..execution_grid import ExecutionConfig, get_execution_grid
         from ..issue_tracker.metadata import extract_metadata
 
         labels = get_label_manager()
@@ -229,76 +258,36 @@ class ManagementLoop:
 
         context = {"clarification_comments": clarification_comments}
         prompt = build_prompt(issue, repo, mode="implement", context=context)
-        config = ExecutionConfig(
+
+        launched = await self._claim_and_launch(
+            issue_id=issue.id,
             repo_url=f"https://github.com/{repo}.git",
             prompt=prompt,
+            mode="implement",
+            issue_number=issue.number,
         )
-
-        grid = get_execution_grid()
-        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
-            execution_id = await grid.launch_agent(
-                config,
-                mode="implement",
-                issue_number=issue.number,
-            )
-        else:
-            execution_id = await grid.launch_agent(config)
-
-        from ..execution_grid import AgentExecution, ExecutionStatus
-
-        execution = AgentExecution(
-            id=execution_id,
-            repo_url=config.repo_url,
-            status=ExecutionStatus.PENDING,
-            prompt=prompt,
-            started_at=utc_now(),
-        )
-        claimed = await self._db.try_claim_issue(execution, issue_id=issue.id)
-        if not claimed:
-            logger.info(f"Issue #{issue.number}: lost claim race, skipping")
-            return
-        logger.info(f"Issue #{issue.number}: UNBLOCKED — launched agent {execution_id}")
+        if launched:
+            logger.info(f"Issue #{issue.number}: UNBLOCKED — launched agent")
 
     async def _launch_planner(self, repo: str, issue) -> None:
         """Launch an agent to decompose a COMPLEX issue into sub-issues."""
         if await self._has_active_execution(issue.id):
             return
 
-        from ..execution_grid import ExecutionConfig, get_execution_grid
-
         labels = get_label_manager()
         await labels.transition_to(repo, issue.id, "ag/planning")
 
         prompt = build_prompt(issue, repo, mode="plan")
-        config = ExecutionConfig(
+
+        launched = await self._claim_and_launch(
+            issue_id=issue.id,
             repo_url=f"https://github.com/{repo}.git",
             prompt=prompt,
+            mode="plan",
+            issue_number=issue.number,
         )
-
-        grid = get_execution_grid()
-        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
-            execution_id = await grid.launch_agent(
-                config,
-                mode="plan",
-                issue_number=issue.number,
-            )
-        else:
-            execution_id = await grid.launch_agent(config)
-
-        from ..execution_grid import AgentExecution, ExecutionStatus
-
-        execution = AgentExecution(
-            id=execution_id,
-            repo_url=config.repo_url,
-            status=ExecutionStatus.PENDING,
-            prompt=prompt,
-            started_at=utc_now(),
-        )
-        claimed = await self._db.try_claim_issue(execution, issue_id=issue.id)
-        if not claimed:
-            logger.info(f"Issue #{issue.number}: lost claim race, skipping")
-            return
-        logger.info(f"Issue #{issue.number}: COMPLEX — launched planner agent {execution_id}")
+        if launched:
+            logger.info(f"Issue #{issue.number}: COMPLEX — launched planner agent")
 
     async def _launch_review_handler(self, repo: str, pr_info: dict) -> None:
         """Launch an agent to address PR review comments."""
@@ -306,10 +295,7 @@ class ManagementLoop:
         if await self._has_active_execution(issue_id):
             return
 
-        from ..execution_grid import ExecutionConfig, get_execution_grid
-
         issue = await self._tracker.get_issue(repo, issue_id)
-
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
 
         context = {
@@ -319,30 +305,17 @@ class ManagementLoop:
         }
 
         prompt = build_prompt(issue, repo, mode="address_review", context=context, checkpoint=checkpoint)
-        config = ExecutionConfig(
+
+        launched = await self._claim_and_launch(
+            issue_id=issue_id,
             repo_url=f"https://github.com/{repo}.git",
             prompt=prompt,
+            mode="address_review",
+            issue_number=int(issue_id),
+            context=context,
         )
-
-        grid = get_execution_grid()
-        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
-            execution_id = await grid.launch_agent(
-                config,
-                mode="address_review",
-                issue_number=int(issue_id),
-                context=context,
-            )
-        else:
-            execution_id = await grid.launch_agent(config)
-
-        from ..execution_grid import AgentExecution
-
-        execution = AgentExecution(id=execution_id, repo_url=config.repo_url, prompt=prompt, started_at=utc_now())
-        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
-        if not claimed:
-            logger.info(f"PR #{pr_info['pr_number']}: lost claim race, skipping")
-            return
-        logger.info(f"PR #{pr_info['pr_number']}: launched review handler agent {execution_id}")
+        if launched:
+            logger.info(f"PR #{pr_info['pr_number']}: launched review handler agent")
 
     async def _launch_retry(self, repo: str, pr_info: dict) -> None:
         """Launch a retry agent for a closed PR with feedback."""
@@ -350,10 +323,7 @@ class ManagementLoop:
         if await self._has_active_execution(issue_id):
             return
 
-        from ..execution_grid import ExecutionConfig, get_execution_grid
-
         issue = await self._tracker.get_issue(repo, issue_id)
-
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
 
         # Check retry count
@@ -376,37 +346,26 @@ class ManagementLoop:
         }
 
         prompt = build_prompt(issue, repo, mode="retry_with_feedback", context=context, checkpoint=checkpoint)
-        config = ExecutionConfig(repo_url=f"https://github.com/{repo}.git", prompt=prompt)
-
-        grid = get_execution_grid()
-        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
-            execution_id = await grid.launch_agent(
-                config,
-                mode="retry_with_feedback",
-                issue_number=int(issue_id),
-                context=context,
-            )
-        else:
-            execution_id = await grid.launch_agent(config)
-
-        # Increment retry count
-        await self._db.upsert_issue_state(
-            issue_number=int(issue_id),
-            repo=repo,
-            retry_count=retry_count + 1,
-        )
 
         labels = get_label_manager()
         await labels.transition_to(repo, issue_id, "ag/in-progress")
 
-        from ..execution_grid import AgentExecution
-
-        execution = AgentExecution(id=execution_id, repo_url=config.repo_url, prompt=prompt, started_at=utc_now())
-        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
-        if not claimed:
-            logger.info(f"Issue #{issue_id}: lost claim race on retry, skipping")
-            return
-        logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent {execution_id}")
+        launched = await self._claim_and_launch(
+            issue_id=issue_id,
+            repo_url=f"https://github.com/{repo}.git",
+            prompt=prompt,
+            mode="retry_with_feedback",
+            issue_number=int(issue_id),
+            context=context,
+        )
+        if launched:
+            # Increment retry count only on successful launch
+            await self._db.upsert_issue_state(
+                issue_number=int(issue_id),
+                repo=repo,
+                retry_count=retry_count + 1,
+            )
+            logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent")
 
     async def _check_in_progress(self, repo: str) -> None:
         """Phase 4: Check in-progress executions for timeouts."""

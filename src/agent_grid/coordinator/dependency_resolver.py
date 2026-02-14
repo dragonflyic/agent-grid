@@ -59,17 +59,30 @@ class DependencyResolver:
             if not sub_issues:
                 continue
 
-            all_done = all(sub.status == IssueStatus.CLOSED for sub in sub_issues)
-            if all_done:
-                await self._tracker.add_comment(
-                    repo,
-                    parent.id,
-                    "All sub-tasks completed! Closing parent issue.",
-                )
-                await self._tracker.update_issue_status(repo, parent.id, IssueStatus.CLOSED)
-                await self._labels.transition_to(repo, parent.id, "ag/done")
-                logger.info(f"Closed parent issue #{parent.number} — all sub-issues done")
-                closed_parents.append(parent.number)
+            failed_subs = [s for s in sub_issues if "ag/failed" in s.labels]
+            pending_subs = [s for s in sub_issues if s.status != IssueStatus.CLOSED and "ag/failed" not in s.labels]
+
+            if not pending_subs:
+                # All sub-issues are either closed or failed — no more work to do
+                if failed_subs:
+                    summary = ", ".join(f"#{s.number}" for s in failed_subs)
+                    await self._tracker.add_comment(
+                        repo,
+                        parent.id,
+                        f"Some sub-tasks failed ({summary}). Needs human review.",
+                    )
+                    await self._labels.transition_to(repo, parent.id, "ag/failed")
+                    logger.info(f"Parent #{parent.number}: {len(failed_subs)} sub-issues failed")
+                else:
+                    await self._tracker.add_comment(
+                        repo,
+                        parent.id,
+                        "All sub-tasks completed! Closing parent issue.",
+                    )
+                    await self._tracker.update_issue_status(repo, parent.id, IssueStatus.CLOSED)
+                    await self._labels.transition_to(repo, parent.id, "ag/done")
+                    logger.info(f"Closed parent issue #{parent.number} — all sub-issues done")
+                    closed_parents.append(parent.number)
 
         return closed_parents
 

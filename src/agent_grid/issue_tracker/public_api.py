@@ -38,6 +38,8 @@ class Comment(BaseModel):
 
     id: str
     body: str
+    author: str = ""
+    author_type: str = ""  # "User" or "Bot"
     created_at: datetime = Field(default_factory=utc_now)
 
 

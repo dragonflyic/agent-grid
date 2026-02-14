@@ -207,7 +207,7 @@ class Scheduler:
             return
 
         # Extract issue ID from agent branch name (agent/42 → "42")
-        match = re.match(r"agent/(\d+)", branch)
+        match = re.match(r"agent/(\d+)(?:-|$)", branch)
         if not match:
             return
 
@@ -215,7 +215,7 @@ class Scheduler:
         from .pr_monitor import get_pr_monitor
 
         pr_monitor = get_pr_monitor()
-        prs_needing_work = await pr_monitor.check_prs(repo)
+        prs_needing_work = await pr_monitor.check_prs(repo, update_timestamp=False)
 
         for pr_info in prs_needing_work:
             if pr_info["pr_number"] == pr_number and pr_info["issue_id"]:
@@ -236,7 +236,7 @@ class Scheduler:
         if not repo or not pr_number:
             return
 
-        match = re.match(r"agent/(\d+)", branch)
+        match = re.match(r"agent/(\d+)(?:-|$)", branch)
         if not match:
             return
         issue_id = match.group(1)

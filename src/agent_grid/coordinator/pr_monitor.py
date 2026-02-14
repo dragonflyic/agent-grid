@@ -35,7 +35,7 @@ class PRMonitor:
         self._tracker = get_issue_tracker()
         self._db = get_database()
 
-    async def check_prs(self, repo: str) -> list[dict]:
+    async def check_prs(self, repo: str, update_timestamp: bool = True) -> list[dict]:
         """Check all agent PRs for new review comments.
 
         Returns list of PRs that need review handling:
@@ -126,11 +126,13 @@ class PRMonitor:
                     }
                 )
 
-        # Update last check timestamp
-        await self._db.set_cron_state(
-            "last_pr_check",
-            {"timestamp": _normalize_timestamp(datetime.utcnow().isoformat())},
-        )
+        # Update last check timestamp (skip when called from webhook to avoid
+        # advancing the cursor and causing the cron loop to miss reviews)
+        if update_timestamp:
+            await self._db.set_cron_state(
+                "last_pr_check",
+                {"timestamp": _normalize_timestamp(datetime.utcnow().isoformat())},
+            )
 
         return prs_needing_attention
 
@@ -209,10 +211,10 @@ class PRMonitor:
         return prs_with_feedback
 
     def _extract_issue_from_branch(self, branch: str) -> str | None:
-        """Extract issue number from agent branch name (agent/42 or agent/42-retry)."""
+        """Extract issue number from agent branch name (agent/42, agent/42-retry, etc)."""
         import re
 
-        match = re.match(r"agent/(\d+)", branch)
+        match = re.match(r"agent/(\d+)(?:-|$)", branch)
         return match.group(1) if match else None
 
     def _extract_issue_number(self, pr_body: str) -> str | None:
