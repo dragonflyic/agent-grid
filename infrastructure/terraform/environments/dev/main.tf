@@ -150,6 +150,10 @@ module "apprunner" {
   environment_variables = {
     AGENT_GRID_AWS_REGION         = var.aws_region
     AGENT_GRID_ISSUE_TRACKER_TYPE = "github"
+    AGENT_GRID_TARGET_REPO        = var.target_repo
+    AGENT_GRID_FLY_APP_NAME       = var.fly_app_name
+    AGENT_GRID_FLY_WORKER_IMAGE   = var.fly_worker_image
+    AGENT_GRID_DRY_RUN            = var.dry_run ? "true" : "false"
   }
 
   environment_secrets = merge(
@@ -157,8 +161,12 @@ module "apprunner" {
       AGENT_GRID_DATABASE_URL = "${module.secrets.database_secret_arn}:connection_string::"
     },
     var.github_token != "" ? {
-      AGENT_GRID_GITHUB_TOKEN        = "${module.secrets.github_secret_arn}:token::"
+      AGENT_GRID_GITHUB_TOKEN          = "${module.secrets.github_secret_arn}:token::"
       AGENT_GRID_GITHUB_WEBHOOK_SECRET = "${module.secrets.github_secret_arn}:webhook_secret::"
+    } : {},
+    module.secrets.coordinator_secret_arn != "" ? {
+      AGENT_GRID_FLY_API_TOKEN    = "${module.secrets.coordinator_secret_arn}:fly_api_token::"
+      AGENT_GRID_ANTHROPIC_API_KEY = "${module.secrets.coordinator_secret_arn}:anthropic_api_key::"
     } : {}
   )
 
