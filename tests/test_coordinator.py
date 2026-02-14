@@ -30,6 +30,31 @@ class TestNudgeRequest:
         assert nudge.source_execution_id == source_id
 
 
+class TestScanner:
+    """Tests for Scanner filtering logic."""
+
+    def test_handled_labels_includes_epic(self):
+        """ag/epic issues must not be re-scanned."""
+        from agent_grid.coordinator.scanner import HANDLED_LABELS
+
+        assert "ag/epic" in HANDLED_LABELS
+
+    def test_handled_labels_includes_sub_issue(self):
+        """ag/sub-issue issues must not be re-scanned."""
+        from agent_grid.coordinator.scanner import HANDLED_LABELS
+
+        assert "ag/sub-issue" in HANDLED_LABELS
+
+    def test_handled_labels_covers_all_non_todo_states(self):
+        """Every ag/* label except ag/todo should be in HANDLED_LABELS."""
+        from agent_grid.coordinator.scanner import HANDLED_LABELS
+        from agent_grid.issue_tracker.label_manager import AG_LABELS
+
+        # ag/todo is the only label that should trigger processing
+        non_actionable = AG_LABELS - {"ag/todo"}
+        assert non_actionable == HANDLED_LABELS
+
+
 class TestBudgetManager:
     """Tests for BudgetManager logic."""
 
