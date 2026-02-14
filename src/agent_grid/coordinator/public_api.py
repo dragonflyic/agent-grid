@@ -206,8 +206,8 @@ async def cancel_execution(execution_id: UUID) -> dict[str, str]:
 @coordinator_router.get("/issue-state/{issue_number}")
 async def get_issue_state(issue_number: int, repo: str | None = None) -> dict[str, Any]:
     """Get issue state including metadata."""
-    from .database import get_database
     from ..config import settings
+    from .database import get_database
 
     db = get_database()
     state = await db.get_issue_state(issue_number, repo or settings.target_repo)
@@ -219,8 +219,8 @@ async def get_issue_state(issue_number: int, repo: str | None = None) -> dict[st
 @coordinator_router.post("/issue-state/{issue_number}/reset-ci")
 async def reset_ci_fix_count(issue_number: int, repo: str | None = None) -> dict[str, Any]:
     """Reset the CI fix counter for an issue."""
-    from .database import get_database
     from ..config import settings
+    from .database import get_database
 
     db = get_database()
     actual_repo = repo or settings.target_repo
