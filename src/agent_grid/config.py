@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     max_tokens_per_run: int = 100000
     max_cost_per_day_usd: float = 50.0
     max_retries_per_issue: int = 2
-    max_ci_fix_retries: int = 2
+    max_ci_fix_retries: int = 5
 
     # Dry-run mode — reads from GitHub but logs all writes to file instead
     dry_run: bool = False
