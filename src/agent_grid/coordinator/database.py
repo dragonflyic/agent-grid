@@ -148,6 +148,15 @@ class Database:
             return self._row_to_execution(row)
         return None
 
+    async def get_issue_id_for_execution(self, execution_id: UUID) -> str | None:
+        """Get the issue_id associated with an execution."""
+        pool = await self._get_pool()
+        row = await pool.fetchrow(
+            "SELECT issue_id FROM executions WHERE id = $1",
+            execution_id,
+        )
+        return row["issue_id"] if row else None
+
     def _row_to_execution(self, row: asyncpg.Record) -> AgentExecution:
         """Convert a database row to an AgentExecution."""
         return AgentExecution(

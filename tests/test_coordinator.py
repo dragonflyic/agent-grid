@@ -55,6 +55,26 @@ class TestScanner:
         assert non_actionable == HANDLED_LABELS
 
 
+class TestDatabaseMethods:
+    """Tests for Database method completeness."""
+
+    def test_get_issue_id_for_execution_exists(self):
+        """Database must have get_issue_id_for_execution — scheduler.py:124 calls it."""
+        from agent_grid.coordinator.database import Database
+
+        assert hasattr(Database, "get_issue_id_for_execution")
+
+    def test_get_issue_id_for_execution_signature(self):
+        """get_issue_id_for_execution must accept execution_id parameter."""
+        import inspect
+
+        from agent_grid.coordinator.database import Database
+
+        sig = inspect.signature(Database.get_issue_id_for_execution)
+        params = list(sig.parameters.keys())
+        assert "execution_id" in params
+
+
 class TestBudgetManager:
     """Tests for BudgetManager logic."""
 
