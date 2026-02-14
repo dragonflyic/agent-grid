@@ -318,9 +318,13 @@ class Scheduler:
         from .management_loop import get_management_loop
 
         loop = get_management_loop()
-        await loop._launch_ci_fix(repo, payload)
+        launched = await loop._launch_ci_fix(repo, payload)
 
-        # Update metadata with SHA and increment count
+        if not launched:
+            logger.info(f"Issue #{issue_id}: CI fix agent not launched (active execution or claim failed)")
+            return
+
+        # Only update metadata after successful launch
         updated_metadata = {**metadata, "last_ci_check_sha": head_sha, "ci_fix_count": ci_fix_count + 1}
         await self._db.upsert_issue_state(
             issue_number=int(issue_id),
