@@ -47,6 +47,33 @@ async def main():
     print(result[:10000])
     print('=== END RESULT ===')
 
+    # Detect branch and PR number from git/gh state
+    import subprocess
+    branch = None
+    pr_number = None
+
+    try:
+        branch = subprocess.check_output(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+            cwd='/workspace/repo', text=True
+        ).strip()
+        if branch in ('main', 'master', 'HEAD'):
+            branch = None
+    except Exception:
+        pass
+
+    if branch:
+        try:
+            pr_list = subprocess.check_output(
+                ['gh', 'pr', 'list', '--head', branch, '--json', 'number', '--limit', '1'],
+                cwd='/workspace/repo', text=True
+            ).strip()
+            prs = json.loads(pr_list) if pr_list else []
+            if prs:
+                pr_number = prs[0]['number']
+        except Exception:
+            pass
+
     # Report back to orchestrator
     import httpx
     callback_url = os.environ.get('ORCHESTRATOR_URL', '') + '/api/agent-status'
@@ -54,6 +81,12 @@ async def main():
         'execution_id': os.environ['EXECUTION_ID'],
         'status': 'completed',
         'result': result[:10000],
+        'branch': branch,
+        'pr_number': pr_number,
+        'checkpoint': {
+            'mode': os.environ.get('MODE', 'implement'),
+            'context_summary': result[:500],
+        },
     }
 
     try:
