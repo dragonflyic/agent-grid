@@ -23,6 +23,7 @@ from ..execution_grid import (
     ExecutionStatus,
     event_bus,
     get_execution_grid,
+    utc_now,
 )
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
@@ -225,21 +226,33 @@ class Scheduler:
                 break
 
     async def _handle_pr_closed(self, event: Event) -> None:
-        """Handle PR closed — launch retry agent if not merged."""
+        """Handle PR closed — transition to ag/done if merged, retry if not."""
         payload = event.payload
         repo = payload.get("repo")
         pr_number = payload.get("pr_number")
         branch = payload.get("branch", "")
         merged = payload.get("merged", False)
 
-        if not repo or not pr_number or merged:
-            return  # Merged PRs are success, not retry
+        if not repo or not pr_number:
+            return
 
         match = re.match(r"agent/(\d+)", branch)
         if not match:
             return
+        issue_id = match.group(1)
 
-        # Use PR monitor to get feedback details
+        if merged:
+            # Success — transition issue to ag/done and close it
+            from ..issue_tracker import IssueStatus
+
+            labels_mgr = get_label_manager()
+            await labels_mgr.transition_to(repo, issue_id, "ag/done")
+            tracker = get_issue_tracker()
+            await tracker.update_issue_status(repo, issue_id, IssueStatus.CLOSED)
+            logger.info(f"PR #{pr_number} merged — issue #{issue_id} marked ag/done")
+            return
+
+        # Not merged — launch retry agent
         from .pr_monitor import get_pr_monitor
 
         pr_monitor = get_pr_monitor()
@@ -436,15 +449,19 @@ class Scheduler:
             )
         else:
             execution_id = await grid.launch_agent(config)
-        logger.info(f"Launched agent {execution_id} for issue {issue_id}")
 
         execution = AgentExecution(
             id=execution_id,
             repo_url=repo_url,
             status=ExecutionStatus.PENDING,
             prompt=prompt,
+            started_at=utc_now(),
         )
-        await self._db.create_execution(execution, issue_id=issue_id)
+        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
+        if not claimed:
+            logger.info(f"Lost claim race for issue {issue_id}")
+            return None
+        logger.info(f"Launched agent {execution_id} for issue {issue_id}")
 
         return execution_id
 

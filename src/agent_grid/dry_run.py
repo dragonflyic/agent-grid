@@ -186,6 +186,16 @@ class DryRunDatabase:
     async def create_execution(self, execution: AgentExecution, issue_id: str) -> None:
         self._executions[execution.id] = {"execution": execution, "issue_id": issue_id}
 
+    async def try_claim_issue(self, execution: AgentExecution, issue_id: str) -> bool:
+        for e in self._executions.values():
+            if e["issue_id"] == issue_id and e["execution"].status in (
+                ExecutionStatus.PENDING,
+                ExecutionStatus.RUNNING,
+            ):
+                return False
+        self._executions[execution.id] = {"execution": execution, "issue_id": issue_id}
+        return True
+
     async def update_execution(self, execution: AgentExecution) -> None:
         if execution.id in self._executions:
             self._executions[execution.id]["execution"] = execution

@@ -14,7 +14,7 @@ import asyncio
 import logging
 
 from ..config import settings
-from ..execution_grid import ExecutionStatus
+from ..execution_grid import ExecutionStatus, utc_now
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
 from ..issue_tracker.metadata import embed_metadata
@@ -187,7 +187,7 @@ class ManagementLoop:
         else:
             execution_id = await grid.launch_agent(config)
 
-        # Record in DB
+        # Record in DB atomically (prevents duplicate launches)
         from ..execution_grid import AgentExecution, ExecutionStatus
 
         execution = AgentExecution(
@@ -195,8 +195,12 @@ class ManagementLoop:
             repo_url=config.repo_url,
             status=ExecutionStatus.PENDING,
             prompt=prompt,
+            started_at=utc_now(),
         )
-        await self._db.create_execution(execution, issue_id=issue.id)
+        claimed = await self._db.try_claim_issue(execution, issue_id=issue.id)
+        if not claimed:
+            logger.info(f"Issue #{issue.number}: lost claim race, skipping")
+            return
         logger.info(f"Issue #{issue.number}: SIMPLE — launched agent {execution_id}")
 
     async def _launch_unblocked(self, repo: str, issue) -> None:
@@ -247,8 +251,12 @@ class ManagementLoop:
             repo_url=config.repo_url,
             status=ExecutionStatus.PENDING,
             prompt=prompt,
+            started_at=utc_now(),
         )
-        await self._db.create_execution(execution, issue_id=issue.id)
+        claimed = await self._db.try_claim_issue(execution, issue_id=issue.id)
+        if not claimed:
+            logger.info(f"Issue #{issue.number}: lost claim race, skipping")
+            return
         logger.info(f"Issue #{issue.number}: UNBLOCKED — launched agent {execution_id}")
 
     async def _launch_planner(self, repo: str, issue) -> None:
@@ -284,8 +292,12 @@ class ManagementLoop:
             repo_url=config.repo_url,
             status=ExecutionStatus.PENDING,
             prompt=prompt,
+            started_at=utc_now(),
         )
-        await self._db.create_execution(execution, issue_id=issue.id)
+        claimed = await self._db.try_claim_issue(execution, issue_id=issue.id)
+        if not claimed:
+            logger.info(f"Issue #{issue.number}: lost claim race, skipping")
+            return
         logger.info(f"Issue #{issue.number}: COMPLEX — launched planner agent {execution_id}")
 
     async def _launch_review_handler(self, repo: str, pr_info: dict) -> None:
@@ -325,8 +337,11 @@ class ManagementLoop:
 
         from ..execution_grid import AgentExecution
 
-        execution = AgentExecution(id=execution_id, repo_url=config.repo_url, prompt=prompt)
-        await self._db.create_execution(execution, issue_id=issue_id)
+        execution = AgentExecution(id=execution_id, repo_url=config.repo_url, prompt=prompt, started_at=utc_now())
+        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
+        if not claimed:
+            logger.info(f"PR #{pr_info['pr_number']}: lost claim race, skipping")
+            return
         logger.info(f"PR #{pr_info['pr_number']}: launched review handler agent {execution_id}")
 
     async def _launch_retry(self, repo: str, pr_info: dict) -> None:
@@ -386,8 +401,11 @@ class ManagementLoop:
 
         from ..execution_grid import AgentExecution
 
-        execution = AgentExecution(id=execution_id, repo_url=config.repo_url, prompt=prompt)
-        await self._db.create_execution(execution, issue_id=issue_id)
+        execution = AgentExecution(id=execution_id, repo_url=config.repo_url, prompt=prompt, started_at=utc_now())
+        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
+        if not claimed:
+            logger.info(f"Issue #{issue_id}: lost claim race on retry, skipping")
+            return
         logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent {execution_id}")
 
     async def _check_in_progress(self, repo: str) -> None:
@@ -395,17 +413,20 @@ class ManagementLoop:
         from ..execution_grid import ExecutionStatus
 
         running = await self._db.get_running_executions()
+        # Also check pending executions that may have stalled
+        pending = await self._db.list_executions(status=ExecutionStatus.PENDING)
 
-        for execution in running:
-            if execution.started_at:
-                from datetime import datetime, timezone
-
-                elapsed = (datetime.now(timezone.utc) - execution.started_at).total_seconds()
-                if elapsed > settings.execution_timeout_seconds:
-                    logger.warning(f"Execution {execution.id} timed out after {elapsed:.0f}s")
-                    execution.status = ExecutionStatus.FAILED
-                    execution.result = "Timed out"
-                    await self._db.update_execution(execution)
+        for execution in running + pending:
+            ref_time = execution.started_at or execution.created_at
+            if not ref_time:
+                continue
+            now = utc_now()
+            elapsed = (now - ref_time).total_seconds()
+            if elapsed > settings.execution_timeout_seconds:
+                logger.warning(f"Execution {execution.id} timed out after {elapsed:.0f}s")
+                execution.status = ExecutionStatus.FAILED
+                execution.result = "Timed out"
+                await self._db.update_execution(execution)
 
     async def run_once(self) -> None:
         """Run a single cycle (for testing)."""

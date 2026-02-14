@@ -70,6 +70,36 @@ class Database:
             execution.created_at,
         )
 
+    async def try_claim_issue(self, execution: AgentExecution, issue_id: str) -> bool:
+        """Atomically claim an issue for execution, preventing duplicates.
+
+        Returns True if the claim succeeded (no other active execution exists).
+        Returns False if another pending/running execution already exists.
+        """
+        pool = await self._get_pool()
+        result = await pool.fetchval(
+            """
+            INSERT INTO executions
+            (id, issue_id, repo_url, status, prompt, result, started_at, completed_at, created_at)
+            SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+            WHERE NOT EXISTS (
+                SELECT 1 FROM executions
+                WHERE issue_id = $2 AND status IN ('pending', 'running')
+            )
+            RETURNING id
+            """,
+            execution.id,
+            issue_id,
+            execution.repo_url,
+            execution.status.value,
+            execution.prompt,
+            execution.result,
+            execution.started_at,
+            execution.completed_at,
+            execution.created_at,
+        )
+        return result is not None
+
     async def update_execution(self, execution: AgentExecution) -> None:
         """Update an existing execution record."""
         pool = await self._get_pool()
