@@ -101,7 +101,11 @@ async def _handle_issue_event(data: dict[str, Any]) -> None:
 
 
 async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
-    """Handle issue comment events."""
+    """Handle issue comment events.
+
+    Publishes ISSUE_COMMENT for human comments on ag/* issues,
+    and NUDGE_REQUESTED for @agent-grid nudge commands.
+    """
     action = data.get("action")
     issue = data.get("issue", {})
     comment = data.get("comment", {})
@@ -113,6 +117,8 @@ async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
     repo_full_name = repo.get("full_name", "")
     issue_number = issue.get("number")
     comment_body = comment.get("body", "")
+    labels = [label["name"] for label in issue.get("labels", [])]
+    is_pull_request = "pull_request" in issue
 
     # Check for nudge commands in comments
     if "@agent-grid nudge" in comment_body.lower():
@@ -123,6 +129,22 @@ async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
                 "issue_id": str(issue_number),
                 "source": "comment",
                 "comment_body": comment_body,
+            },
+        )
+        return
+
+    # Publish comment event for ag/* issues so scheduler can react
+    has_ag_label = any(label.startswith("ag/") for label in labels)
+    if has_ag_label:
+        await event_bus.publish(
+            EventType.ISSUE_COMMENT,
+            {
+                "repo": repo_full_name,
+                "issue_id": str(issue_number),
+                "comment_body": comment_body,
+                "labels": labels,
+                "is_pull_request": is_pull_request,
+                "comment_author": comment.get("user", {}).get("login", ""),
             },
         )
 
