@@ -367,18 +367,21 @@ class ManagementLoop:
             )
             logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent")
 
-    async def _launch_ci_fix(self, repo: str, check_info: dict) -> None:
-        """Launch an agent to fix a failing CI check on an agent PR."""
+    async def _launch_ci_fix(self, repo: str, check_info: dict) -> bool:
+        """Launch an agent to fix a failing CI check on an agent PR.
+
+        Returns True if agent was launched, False otherwise.
+        """
         import re
 
         branch = check_info.get("branch", "")
         match = re.match(r"agent/(\d+)(?:-|$)", branch)
         if not match:
-            return
+            return False
         issue_id = match.group(1)
 
         if await self._has_active_execution(issue_id):
-            return
+            return False
 
         issue = await self._tracker.get_issue(repo, issue_id)
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
@@ -403,6 +406,7 @@ class ManagementLoop:
         )
         if launched:
             logger.info(f"Issue #{issue_id}: launched CI fix agent for '{check_info.get('check_name')}'")
+        return launched
 
     async def _check_in_progress(self, repo: str) -> None:
         """Phase 4: Check in-progress executions for timeouts."""
