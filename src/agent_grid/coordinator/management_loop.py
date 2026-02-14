@@ -295,6 +295,7 @@ class ManagementLoop:
             return
 
         from ..execution_grid import ExecutionConfig, get_execution_grid
+
         issue = await self._tracker.get_issue(repo, issue_id)
 
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
@@ -335,6 +336,7 @@ class ManagementLoop:
             return
 
         from ..execution_grid import ExecutionConfig, get_execution_grid
+
         issue = await self._tracker.get_issue(repo, issue_id)
 
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
