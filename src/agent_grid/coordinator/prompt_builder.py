@@ -221,4 +221,54 @@ git push -u origin {new_branch}
         )
         return prompt
 
+    elif mode == "fix_ci":
+        pr_number = context.get("pr_number")
+        existing_branch = context.get("existing_branch", branch_name)
+        check_name = context.get("check_name", "")
+        check_output = context.get("check_output", "")
+        check_url = context.get("check_url", "")
+
+        prompt = (
+            base
+            + f"""
+## IMPORTANT: CI check "{check_name}" failed on your PR #{pr_number}
+
+Previous work is on branch: {existing_branch}
+Checkout that branch (don't create a new one):
+```bash
+git checkout {existing_branch}
+git pull origin {existing_branch}
+```
+
+### CI Failure Details
+- Check: {check_name}
+- URL: {check_url}
+
+Output:
+```
+{check_output[:2000]}
+```
+
+### Instructions
+1. Read the CI failure output above carefully
+2. Reproduce the failure locally by running the relevant check
+3. Fix the issue with minimal changes — do not refactor unrelated code
+4. Run the check locally to verify the fix
+5. Push the fix to the same branch:
+```bash
+git push origin {existing_branch}
+```
+
+Do NOT create a new PR. Your commits will be added to the existing PR #{pr_number}.
+Do NOT force push or squash.
+"""
+        )
+        if checkpoint:
+            prompt += f"""
+## Previous Context
+What the previous agent run did:
+- {checkpoint.get("context_summary", "N/A")}
+"""
+        return prompt
+
     return base

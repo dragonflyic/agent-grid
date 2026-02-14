@@ -86,6 +86,8 @@ class Scheduler:
                 await self._handle_pr_review(event)
             elif event.type == EventType.PR_CLOSED:
                 await self._handle_pr_closed(event)
+            elif event.type == EventType.CHECK_RUN_FAILED:
+                await self._handle_check_run_failed(event)
         except Exception:
             logger.exception(f"Error handling event {event.type}")
 
@@ -265,6 +267,67 @@ class Scheduler:
                 loop = get_management_loop()
                 await loop._launch_retry(repo, pr_info)
                 break
+
+    async def _handle_check_run_failed(self, event: Event) -> None:
+        """Handle CI check failure on an agent PR — launch fix agent."""
+        from ..config import settings
+
+        payload = event.payload
+        repo = payload.get("repo")
+        branch = payload.get("branch", "")
+        head_sha = payload.get("head_sha", "")
+
+        if not repo or not branch:
+            return
+
+        # Extract issue ID from agent branch name
+        match = re.match(r"agent/(\d+)(?:-|$)", branch)
+        if not match:
+            return
+        issue_id = match.group(1)
+
+        # Deduplicate: skip if we already processed this SHA
+        issue_state = await self._db.get_issue_state(int(issue_id), repo)
+        metadata = (issue_state or {}).get("metadata") or {}
+        if isinstance(metadata, str):
+            import json
+
+            metadata = json.loads(metadata)
+
+        if head_sha and metadata.get("last_ci_check_sha") == head_sha:
+            logger.info(f"CI fix already attempted for SHA {head_sha[:8]}, skipping")
+            return
+
+        # Check CI fix retry limit
+        ci_fix_count = metadata.get("ci_fix_count", 0)
+        if ci_fix_count >= settings.max_ci_fix_retries:
+            logger.warning(f"Issue #{issue_id}: CI fix retry limit ({settings.max_ci_fix_retries}) reached")
+            tracker = get_issue_tracker()
+            check_name = payload.get("check_name")
+            await tracker.add_comment(
+                repo,
+                issue_id,
+                f"CI check `{check_name}` keeps failing after "
+                f"{ci_fix_count} auto-fix attempts. Needs human intervention.",
+            )
+            labels_mgr = get_label_manager()
+            await labels_mgr.transition_to(repo, issue_id, "ag/failed")
+            return
+
+        # Launch CI fix agent
+        from .management_loop import get_management_loop
+
+        loop = get_management_loop()
+        await loop._launch_ci_fix(repo, payload)
+
+        # Update metadata with SHA and increment count
+        updated_metadata = {**metadata, "last_ci_check_sha": head_sha, "ci_fix_count": ci_fix_count + 1}
+        await self._db.upsert_issue_state(
+            issue_number=int(issue_id),
+            repo=repo,
+            metadata=updated_metadata,
+        )
+        logger.info(f"Issue #{issue_id}: CI fix #{ci_fix_count + 1} launched for '{payload.get('check_name')}'")
 
     # -------------------------------------------------------------------------
     # Classification + launch (shared by issue_created and issue_updated)
