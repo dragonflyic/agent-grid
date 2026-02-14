@@ -314,6 +314,21 @@ class Scheduler:
             await labels_mgr.transition_to(repo, issue_id, "ag/failed")
             return
 
+        # Fetch actual CI logs if check_output is empty (GitHub Actions doesn't populate output fields)
+        job_id = payload.get("job_id")
+        if not payload.get("check_output") and job_id and repo:
+            try:
+                from ..issue_tracker.github_client import GitHubClient
+
+                tracker = get_issue_tracker()
+                if isinstance(tracker, GitHubClient):
+                    logs = await tracker.get_actions_job_logs(repo, job_id)
+                    if logs:
+                        payload = {**payload, "check_output": logs}
+                        logger.info(f"Issue #{issue_id}: fetched {len(logs)} chars of CI logs")
+            except Exception as e:
+                logger.warning(f"Issue #{issue_id}: failed to fetch CI logs: {e}")
+
         # Launch CI fix agent
         from .management_loop import get_management_loop
 
