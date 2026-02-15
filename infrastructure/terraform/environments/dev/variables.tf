@@ -80,3 +80,22 @@ variable "dry_run" {
   default     = false
 }
 
+variable "execution_backend" {
+  description = "Execution backend: 'oz' (Warp Oz) or 'fly' (Fly Machines)"
+  type        = string
+  default     = "oz"
+}
+
+variable "warp_api_key" {
+  description = "Warp Oz API key for cloud agent runs"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "oz_environment_id" {
+  description = "Warp Oz environment ID (pre-configured with repo and tools)"
+  type        = string
+  default     = ""
+}
+
