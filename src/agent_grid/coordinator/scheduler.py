@@ -445,20 +445,38 @@ class Scheduler:
         execution_id = payload.get("execution_id")
 
         if execution_id:
-            execution = await self._db.get_execution(UUID(execution_id))
-            if execution:
-                execution.status = ExecutionStatus.COMPLETED
-                execution.result = payload.get("result")
-                await self._db.update_execution(execution)
+            exec_uuid = UUID(execution_id)
+            checkpoint = payload.get("checkpoint")
+            pr_number = payload.get("pr_number")
+            branch = payload.get("branch")
 
-                # Save checkpoint if present
-                checkpoint = payload.get("checkpoint")
-                issue_id = await self._db.get_issue_id_for_execution(UUID(execution_id))
-                if checkpoint and issue_id:
-                    await self._db.save_checkpoint(UUID(execution_id), checkpoint)
+            # Use update_execution_result when we have structured data (PR, branch, checkpoint)
+            if pr_number or branch or checkpoint:
+                await self._db.update_execution_result(
+                    execution_id=exec_uuid,
+                    status=ExecutionStatus.COMPLETED,
+                    result=payload.get("result"),
+                    pr_number=pr_number,
+                    branch=branch,
+                    checkpoint=checkpoint,
+                )
+            else:
+                execution = await self._db.get_execution(exec_uuid)
+                if execution:
+                    execution.status = ExecutionStatus.COMPLETED
+                    execution.result = payload.get("result")
+                    await self._db.update_execution(execution)
 
-                # Update label to review-pending
-                if issue_id:
+            issue_id = await self._db.get_issue_id_for_execution(exec_uuid)
+
+            # Save checkpoint if present
+            if checkpoint and issue_id:
+                await self._db.save_checkpoint(exec_uuid, checkpoint)
+
+            # Update label to review-pending
+            if issue_id:
+                execution = await self._db.get_execution(exec_uuid)
+                if execution:
                     repo = self._extract_repo_from_url(execution.repo_url)
                     if repo:
                         labels_mgr = get_label_manager()

@@ -16,6 +16,7 @@ from .public_api import (
 
 if TYPE_CHECKING:
     from .fly_grid import FlyExecutionGrid
+    from .oz_grid import OzExecutionGrid
 
 
 class ExecutionGridService(ExecutionGrid):
@@ -74,28 +75,37 @@ class ExecutionGridService(ExecutionGrid):
             event_bus.unsubscribe(event_handler, event_type=None)
 
 
-# Global service instance
+# Global service instances
 _service: ExecutionGridService | None = None
 _fly_grid: "FlyExecutionGrid | None" = None
+_oz_grid: "OzExecutionGrid | None" = None
 
 
 def get_execution_grid() -> ExecutionGrid:
     """
     Get the global execution grid service instance.
 
-    Returns different implementations based on deployment_mode:
-    - "local": In-memory service that runs agents directly
-    - "coordinator": Fly Machines-based client that spawns ephemeral workers
+    Returns different implementations based on deployment_mode and execution_backend:
+    - deployment_mode="local": In-memory service that runs agents directly
+    - deployment_mode="coordinator" + execution_backend="oz": Warp Oz cloud runs
+    - deployment_mode="coordinator" + execution_backend="fly": Fly Machines workers
     """
-    global _service, _fly_grid
+    global _service, _fly_grid, _oz_grid
 
     if settings.deployment_mode == "coordinator":
-        # Fly Machines-based implementation for cloud coordinator
-        if _fly_grid is None:
-            from .fly_grid import FlyExecutionGrid
+        if settings.execution_backend == "oz":
+            if _oz_grid is None:
+                from .oz_grid import OzExecutionGrid
 
-            _fly_grid = FlyExecutionGrid()
-        return _fly_grid
+                _oz_grid = OzExecutionGrid()
+            return _oz_grid
+        else:
+            # Fly Machines-based implementation
+            if _fly_grid is None:
+                from .fly_grid import FlyExecutionGrid
+
+                _fly_grid = FlyExecutionGrid()
+            return _fly_grid
     else:
         # Default: local in-memory implementation
         if _service is None:

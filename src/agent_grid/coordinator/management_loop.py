@@ -186,7 +186,10 @@ class ManagementLoop:
         config = ExecutionConfig(repo_url=repo_url, prompt=prompt)
         grid = get_execution_grid()
         try:
-            if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
+            from ..execution_grid.fly_grid import FlyExecutionGrid
+            from ..execution_grid.oz_grid import OzExecutionGrid
+
+            if isinstance(grid, (FlyExecutionGrid, OzExecutionGrid)):
                 kwargs: dict = {"mode": mode, "execution_id": execution_id}
                 if issue_number is not None:
                     kwargs["issue_number"] = issue_number
