@@ -84,6 +84,15 @@ class OzExecutionGrid(ExecutionGrid):
 
             self._run_map[execution_id] = response.run_id
 
+            # Persist oz_run_id to DB so we can recover after process restart
+            try:
+                from ..coordinator.database import get_database
+
+                db = get_database()
+                await db.set_external_run_id(execution_id, response.run_id)
+            except Exception as e:
+                logger.warning(f"Failed to persist oz_run_id to DB: {e}")
+
             await event_bus.publish(
                 EventType.AGENT_STARTED,
                 {
@@ -105,9 +114,28 @@ class OzExecutionGrid(ExecutionGrid):
         return execution_id
 
     async def start_polling(self) -> None:
-        """Start the background polling loop for run completion."""
+        """Start the background polling loop for run completion.
+
+        Also recovers in-flight Oz runs from the database so that runs
+        launched before a process restart are still tracked.
+        """
         if self._polling:
             return
+
+        # Recover in-flight runs from DB
+        try:
+            from ..coordinator.database import get_database
+
+            db = get_database()
+            active_runs = await db.get_active_executions_with_external_run_id()
+            for exec_id, run_id in active_runs:
+                if exec_id not in self._run_map:
+                    self._run_map[exec_id] = run_id
+            if active_runs:
+                logger.info(f"Recovered {len(active_runs)} in-flight Oz runs from DB")
+        except Exception as e:
+            logger.warning(f"Failed to recover Oz runs from DB: {e}")
+
         self._polling = True
         self._poll_task = asyncio.create_task(self._poll_loop())
         logger.info(f"Oz polling started (interval={settings.oz_poll_interval_seconds}s)")

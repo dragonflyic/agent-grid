@@ -14,6 +14,7 @@ CREATE TABLE executions (
     pr_number INT,
     branch TEXT,
     checkpoint JSONB,
+    external_run_id TEXT,  -- Oz run ID or other backend-specific run identifier
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -67,5 +68,6 @@ CREATE UNIQUE INDEX idx_executions_active_issue ON executions(issue_id) WHERE st
 CREATE INDEX idx_executions_created_at ON executions(created_at);
 CREATE INDEX idx_nudge_queue_pending ON nudge_queue(processed_at) WHERE processed_at IS NULL;
 CREATE INDEX idx_budget_usage_recorded_at ON budget_usage(recorded_at);
+CREATE INDEX idx_executions_external_run_id ON executions(external_run_id);
 CREATE INDEX idx_issue_state_classification ON issue_state(classification);
 CREATE INDEX idx_issue_state_repo ON issue_state(repo);
