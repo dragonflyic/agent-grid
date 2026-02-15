@@ -46,6 +46,7 @@ class OzExecutionGrid(ExecutionGrid):
         self._handler_mapping: dict[int, Callable[[Event], Awaitable[None]]] = {}
         self._poll_task: asyncio.Task | None = None
         self._polling = False
+        self._poll_errors: dict[UUID, int] = {}  # consecutive poll failures per execution
 
     async def launch_agent(
         self,
@@ -122,6 +123,11 @@ class OzExecutionGrid(ExecutionGrid):
                 pass
             self._poll_task = None
 
+    async def close(self) -> None:
+        """Stop polling and close the underlying HTTP client."""
+        await self.stop_polling()
+        await self._client.close()
+
     async def _poll_loop(self) -> None:
         """Background loop that checks Oz for completed runs."""
         while self._polling:
@@ -139,6 +145,10 @@ class OzExecutionGrid(ExecutionGrid):
         for exec_id, run_id in list(self._run_map.items()):
             try:
                 run = await self._client.agent.runs.retrieve(run_id)
+
+                # Guard: execution may have been cancelled during the await above
+                if exec_id not in self._run_map:
+                    continue
 
                 if run.state not in _TERMINAL_STATES:
                     continue
@@ -202,9 +212,20 @@ class OzExecutionGrid(ExecutionGrid):
                 # Clean up tracking
                 self._executions.pop(exec_id, None)
                 self._run_map.pop(exec_id, None)
+                self._poll_errors.pop(exec_id, None)
 
             except Exception:
                 logger.exception(f"Error checking Oz run {run_id}")
+                self._poll_errors[exec_id] = self._poll_errors.get(exec_id, 0) + 1
+                if self._poll_errors[exec_id] >= 10:
+                    logger.error(f"Giving up on Oz run {run_id} after 10 poll failures")
+                    self._run_map.pop(exec_id, None)
+                    self._executions.pop(exec_id, None)
+                    self._poll_errors.pop(exec_id, None)
+                    await event_bus.publish(
+                        EventType.AGENT_FAILED,
+                        {"execution_id": str(exec_id), "error": "Lost contact with Oz run"},
+                    )
 
     async def get_execution_status(self, execution_id: UUID) -> AgentExecution | None:
         return self._executions.get(execution_id)

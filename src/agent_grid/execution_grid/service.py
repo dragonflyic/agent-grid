@@ -95,9 +95,9 @@ def get_execution_grid() -> ExecutionGrid:
     if settings.deployment_mode == "coordinator":
         if settings.execution_backend == "oz":
             if _oz_grid is None:
-                from .oz_grid import OzExecutionGrid
+                from .oz_grid import get_oz_execution_grid
 
-                _oz_grid = OzExecutionGrid()
+                _oz_grid = get_oz_execution_grid()
             return _oz_grid
         else:
             # Fly Machines-based implementation

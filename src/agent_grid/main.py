@@ -105,12 +105,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scheduler = get_scheduler()
     await scheduler.stop()
 
-    # Stop Oz polling if active
+    # Stop Oz polling and close client if active
     if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
         from .execution_grid.oz_grid import get_oz_execution_grid
 
         oz_grid = get_oz_execution_grid()
-        await oz_grid.stop_polling()
+        await oz_grid.close()
 
     await event_bus.stop()
 
