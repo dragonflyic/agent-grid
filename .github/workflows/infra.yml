@@ -20,7 +20,9 @@ env:
   TF_VAR_github_org: ${{ vars.TF_VAR_GITHUB_ORG }}
   TF_VAR_fly_api_token: ${{ secrets.FLY_API_TOKEN }}
   TF_VAR_anthropic_api_key: ${{ secrets.TF_VAR_ANTHROPIC_API_KEY }}
+  TF_VAR_warp_api_key: ${{ secrets.TF_VAR_WARP_API_KEY }}
   TF_VAR_target_repo: ${{ vars.TF_VAR_TARGET_REPO }}
+  TF_VAR_oz_environment_id: ${{ vars.TF_VAR_OZ_ENVIRONMENT_ID }}
 
 jobs:
   plan:
