@@ -128,6 +128,7 @@ module "secrets" {
   github_webhook_secret = var.github_webhook_secret
   fly_api_token         = var.fly_api_token
   anthropic_api_key     = var.anthropic_api_key
+  warp_api_key          = var.warp_api_key
 
   tags = local.tags
 }
@@ -148,13 +149,16 @@ module "apprunner" {
   vpc_connector_security_groups = [aws_security_group.apprunner_private.id]
 
   environment_variables = {
-    AGENT_GRID_AWS_REGION         = var.aws_region
-    AGENT_GRID_ISSUE_TRACKER_TYPE = "github"
-    AGENT_GRID_TARGET_REPO        = var.target_repo
-    AGENT_GRID_FLY_APP_NAME       = var.fly_app_name
-    AGENT_GRID_FLY_WORKER_IMAGE   = var.fly_worker_image
-    AGENT_GRID_DRY_RUN            = var.dry_run ? "true" : "false"
-    AGENT_GRID_COORDINATOR_URL    = var.coordinator_url
+    AGENT_GRID_AWS_REGION          = var.aws_region
+    AGENT_GRID_DEPLOYMENT_MODE     = "coordinator"
+    AGENT_GRID_EXECUTION_BACKEND   = var.execution_backend
+    AGENT_GRID_ISSUE_TRACKER_TYPE  = "github"
+    AGENT_GRID_TARGET_REPO         = var.target_repo
+    AGENT_GRID_OZ_ENVIRONMENT_ID   = var.oz_environment_id
+    AGENT_GRID_FLY_APP_NAME        = var.fly_app_name
+    AGENT_GRID_FLY_WORKER_IMAGE    = var.fly_worker_image
+    AGENT_GRID_DRY_RUN             = var.dry_run ? "true" : "false"
+    AGENT_GRID_COORDINATOR_URL     = var.coordinator_url
   }
 
   environment_secrets = merge(
@@ -168,6 +172,7 @@ module "apprunner" {
     module.secrets.coordinator_secret_arn != "" ? {
       AGENT_GRID_FLY_API_TOKEN    = "${module.secrets.coordinator_secret_arn}:fly_api_token::"
       AGENT_GRID_ANTHROPIC_API_KEY = "${module.secrets.coordinator_secret_arn}:anthropic_api_key::"
+      AGENT_GRID_WARP_API_KEY     = "${module.secrets.coordinator_secret_arn}:warp_api_key::"
     } : {}
   )
 
@@ -190,14 +195,16 @@ module "ecs_scheduled_task" {
   secret_arns        = module.secrets.all_secret_arns
 
   environment_variables = {
-    AGENT_GRID_DEPLOYMENT_MODE    = "coordinator"
-    AGENT_GRID_ISSUE_TRACKER_TYPE = "github"
-    AGENT_GRID_TARGET_REPO        = var.target_repo
-    AGENT_GRID_FLY_APP_NAME       = var.fly_app_name
-    AGENT_GRID_FLY_WORKER_IMAGE   = var.fly_worker_image
-    AGENT_GRID_DRY_RUN            = var.dry_run ? "true" : "false"
-    PYTHONPATH                    = "/app/src"
-    PYTHONUNBUFFERED               = "1"
+    AGENT_GRID_DEPLOYMENT_MODE     = "coordinator"
+    AGENT_GRID_EXECUTION_BACKEND   = var.execution_backend
+    AGENT_GRID_ISSUE_TRACKER_TYPE  = "github"
+    AGENT_GRID_TARGET_REPO         = var.target_repo
+    AGENT_GRID_OZ_ENVIRONMENT_ID   = var.oz_environment_id
+    AGENT_GRID_FLY_APP_NAME        = var.fly_app_name
+    AGENT_GRID_FLY_WORKER_IMAGE    = var.fly_worker_image
+    AGENT_GRID_DRY_RUN             = var.dry_run ? "true" : "false"
+    PYTHONPATH                     = "/app/src"
+    PYTHONUNBUFFERED                = "1"
   }
 
   environment_secrets = merge(
@@ -210,6 +217,7 @@ module "ecs_scheduled_task" {
     module.secrets.coordinator_secret_arn != "" ? {
       AGENT_GRID_FLY_API_TOKEN     = "${module.secrets.coordinator_secret_arn}:fly_api_token::"
       AGENT_GRID_ANTHROPIC_API_KEY = "${module.secrets.coordinator_secret_arn}:anthropic_api_key::"
+      AGENT_GRID_WARP_API_KEY      = "${module.secrets.coordinator_secret_arn}:warp_api_key::"
     } : {}
   )
 

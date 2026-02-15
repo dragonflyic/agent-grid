@@ -78,6 +78,8 @@ class Scheduler:
                 await self._handle_issue_comment(event)
             elif event.type == EventType.NUDGE_REQUESTED:
                 await self._handle_nudge_requested(event)
+            elif event.type == EventType.AGENT_STARTED:
+                await self._handle_agent_started(event)
             elif event.type == EventType.AGENT_COMPLETED:
                 await self._handle_agent_completed(event)
             elif event.type == EventType.AGENT_FAILED:
@@ -439,26 +441,58 @@ class Scheduler:
     # Agent completion/failure
     # -------------------------------------------------------------------------
 
+    async def _handle_agent_started(self, event: Event) -> None:
+        """Handle agent start — transition DB status from PENDING to RUNNING."""
+        payload = event.payload
+        execution_id = payload.get("execution_id")
+        if not execution_id:
+            return
+
+        exec_uuid = UUID(execution_id)
+        execution = await self._db.get_execution(exec_uuid)
+        if execution and execution.status == ExecutionStatus.PENDING:
+            execution.status = ExecutionStatus.RUNNING
+            execution.started_at = execution.started_at or utc_now()
+            await self._db.update_execution(execution)
+
     async def _handle_agent_completed(self, event: Event) -> None:
         """Handle agent completion — save checkpoint and update labels."""
         payload = event.payload
         execution_id = payload.get("execution_id")
 
         if execution_id:
-            execution = await self._db.get_execution(UUID(execution_id))
-            if execution:
-                execution.status = ExecutionStatus.COMPLETED
-                execution.result = payload.get("result")
-                await self._db.update_execution(execution)
+            exec_uuid = UUID(execution_id)
+            checkpoint = payload.get("checkpoint")
+            pr_number = payload.get("pr_number")
+            branch = payload.get("branch")
 
-                # Save checkpoint if present
-                checkpoint = payload.get("checkpoint")
-                issue_id = await self._db.get_issue_id_for_execution(UUID(execution_id))
-                if checkpoint and issue_id:
-                    await self._db.save_checkpoint(UUID(execution_id), checkpoint)
+            # Use update_execution_result when we have structured data (PR, branch, checkpoint)
+            if pr_number or branch or checkpoint:
+                await self._db.update_execution_result(
+                    execution_id=exec_uuid,
+                    status=ExecutionStatus.COMPLETED,
+                    result=payload.get("result"),
+                    pr_number=pr_number,
+                    branch=branch,
+                    checkpoint=checkpoint,
+                )
+            else:
+                execution = await self._db.get_execution(exec_uuid)
+                if execution:
+                    execution.status = ExecutionStatus.COMPLETED
+                    execution.result = payload.get("result")
+                    await self._db.update_execution(execution)
 
-                # Update label to review-pending
-                if issue_id:
+            issue_id = await self._db.get_issue_id_for_execution(exec_uuid)
+
+            # Save checkpoint if present
+            if checkpoint and issue_id:
+                await self._db.save_checkpoint(exec_uuid, checkpoint)
+
+            # Update label to review-pending
+            if issue_id:
+                execution = await self._db.get_execution(exec_uuid)
+                if execution:
                     repo = self._extract_repo_from_url(execution.repo_url)
                     if repo:
                         labels_mgr = get_label_manager()
@@ -523,7 +557,11 @@ class Scheduler:
         )
 
         grid = get_execution_grid()
-        if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
+
+        from ..execution_grid.fly_grid import FlyExecutionGrid
+        from ..execution_grid.oz_grid import OzExecutionGrid
+
+        if isinstance(grid, (FlyExecutionGrid, OzExecutionGrid)):
             execution_id = await grid.launch_agent(
                 config,
                 mode="implement",

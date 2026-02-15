@@ -36,20 +36,21 @@ resource "aws_secretsmanager_secret_version" "github" {
   })
 }
 
-# Coordinator secrets (Fly.io + Anthropic API keys)
+# Coordinator secrets (Fly.io, Anthropic, Warp Oz API keys)
 resource "aws_secretsmanager_secret" "coordinator" {
-  count       = var.fly_api_token != "" || var.anthropic_api_key != "" ? 1 : 0
+  count       = var.fly_api_token != "" || var.anthropic_api_key != "" || var.warp_api_key != "" ? 1 : 0
   name        = "${var.project_name}/coordinator"
-  description = "Coordinator secrets (Fly.io, Anthropic)"
+  description = "Coordinator secrets (Fly.io, Anthropic, Warp Oz)"
 
   tags = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "coordinator" {
-  count     = var.fly_api_token != "" || var.anthropic_api_key != "" ? 1 : 0
+  count     = var.fly_api_token != "" || var.anthropic_api_key != "" || var.warp_api_key != "" ? 1 : 0
   secret_id = aws_secretsmanager_secret.coordinator[0].id
   secret_string = jsonencode({
-    fly_api_token    = var.fly_api_token
+    fly_api_token     = var.fly_api_token
     anthropic_api_key = var.anthropic_api_key
+    warp_api_key      = var.warp_api_key
   })
 }

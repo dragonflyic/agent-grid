@@ -887,6 +887,29 @@ rich = ["rich (>=13.9.4)"]
 ws = ["websockets (>=15.0.1)"]
 
 [[package]]
+name = "oz-agent-sdk"
+version = "0.6.1"
+description = "The official Python library for the oz-api API"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "oz_agent_sdk-0.6.1-py3-none-any.whl", hash = "sha256:a711854cbc9dd2bad39d810c9e43718e906fcaa430c76039ff50cdf4e8abf3ac"},
+    {file = "oz_agent_sdk-0.6.1.tar.gz", hash = "sha256:4876ec1af0066d868afe26a478ca9bc666b6046d7841900406ff68e06976a82d"},
+]
+
+[package.dependencies]
+anyio = ">=3.5.0,<5"
+distro = ">=1.7.0,<2"
+httpx = ">=0.23.0,<1"
+pydantic = ">=1.9.0,<3"
+sniffio = "*"
+typing-extensions = ">=4.10,<5"
+
+[package.extras]
+aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9)"]
+
+[[package]]
 name = "packaging"
 version = "26.0"
 description = "Core utilities for Python packages"
@@ -1785,4 +1808,4 @@ standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "037b67b8070170b8bb450890c18a67b7fc784b699b5744cbf610c35b63da0885"
+content-hash = "afd79fb4301b0e377438bb658a35e85cd62cf5011de5d01e9783c939aa99268f"

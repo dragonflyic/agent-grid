@@ -434,6 +434,31 @@ class Database:
 
     # Execution updates for new columns
 
+    async def set_external_run_id(self, execution_id: UUID, external_run_id: str) -> None:
+        """Store the backend-specific run ID (e.g. Oz run ID) for an execution."""
+        pool = await self._get_pool()
+        await pool.execute(
+            "UPDATE executions SET external_run_id = $2 WHERE id = $1",
+            execution_id,
+            external_run_id,
+        )
+
+    async def get_active_executions_with_external_run_id(self) -> list[tuple[UUID, str]]:
+        """Get all pending/running executions that have an external_run_id.
+
+        Used to recover in-flight Oz runs after process restart.
+        Returns list of (execution_id, external_run_id) tuples.
+        """
+        pool = await self._get_pool()
+        rows = await pool.fetch(
+            """
+            SELECT id, external_run_id FROM executions
+            WHERE status IN ('pending', 'running')
+            AND external_run_id IS NOT NULL
+            """,
+        )
+        return [(row["id"], row["external_run_id"]) for row in rows]
+
     async def update_execution_result(
         self,
         execution_id: UUID,

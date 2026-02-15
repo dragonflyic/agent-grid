@@ -171,7 +171,18 @@ class AgentStatusCallback(BaseModel):
 
 @coordinator_router.post("/agent-status")
 async def agent_status_callback(body: AgentStatusCallback) -> dict[str, str]:
-    """Callback endpoint for Fly Machine workers to report results."""
+    """Callback endpoint for Fly Machine workers to report results.
+
+    Only active when execution_backend is 'fly'. Oz uses polling instead.
+    """
+    from ..config import settings
+
+    if settings.execution_backend != "fly":
+        raise HTTPException(
+            status_code=400,
+            detail="Agent status callback is only available with the Fly execution backend",
+        )
+
     from ..execution_grid.fly_grid import get_fly_execution_grid
 
     grid = get_fly_execution_grid()
@@ -188,7 +199,8 @@ async def agent_status_callback(body: AgentStatusCallback) -> dict[str, str]:
 
 @coordinator_router.post("/executions/{execution_id}/cancel")
 async def cancel_execution(execution_id: UUID) -> dict[str, str]:
-    """Mark an execution as failed (e.g. after manually killing a machine)."""
+    """Cancel an active execution (stops the backend run and updates DB)."""
+    from ..execution_grid import get_execution_grid
     from .database import get_database
 
     db = get_database()
@@ -197,6 +209,14 @@ async def cancel_execution(execution_id: UUID) -> dict[str, str]:
         raise HTTPException(status_code=404, detail="Execution not found")
     if execution.status not in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
         raise HTTPException(status_code=400, detail=f"Execution is already {execution.status}")
+
+    # Cancel the actual backend run (Oz/Fly) so it stops burning compute
+    grid = get_execution_grid()
+    try:
+        await grid.cancel_execution(execution_id)
+    except Exception:
+        pass  # Best-effort; DB update below ensures consistent state
+
     execution.status = ExecutionStatus.FAILED
     execution.result = "Manually cancelled"
     await db.update_execution(execution)

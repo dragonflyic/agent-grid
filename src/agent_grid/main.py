@@ -58,6 +58,15 @@ async def _connect_and_start_services(db, logger) -> None:
 
     agent_logger = get_agent_event_logger()
     await agent_logger.start()
+
+    # Start Oz polling if using Oz backend
+    if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
+        from .execution_grid.oz_grid import get_oz_execution_grid
+
+        oz_grid = get_oz_execution_grid()
+        await oz_grid.start_polling()
+        logger.info(f"Oz polling started (interval={settings.oz_poll_interval_seconds}s)")
+
     logger.info("All services started")
 
 
@@ -96,13 +105,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scheduler = get_scheduler()
     await scheduler.stop()
 
+    # Stop Oz polling and close client if active
+    if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
+        from .execution_grid.oz_grid import get_oz_execution_grid
+
+        oz_grid = get_oz_execution_grid()
+        await oz_grid.close()
+
     await event_bus.stop()
 
     tracker = get_issue_tracker()
     await tracker.close()
 
-    # Close Fly client if in coordinator mode
-    if settings.deployment_mode == "coordinator":
+    # Close Fly client if using Fly backend
+    if settings.deployment_mode == "coordinator" and settings.execution_backend == "fly":
         from .fly import get_fly_client
 
         fly_client = get_fly_client()

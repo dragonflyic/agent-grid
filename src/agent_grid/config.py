@@ -49,7 +49,16 @@ class Settings(BaseSettings):
     # Target repository
     target_repo: str = ""  # e.g. "myorg/myrepo"
 
-    # Fly.io configuration
+    # Execution backend: "oz" (Warp Oz) or "fly" (Fly Machines)
+    execution_backend: Literal["oz", "fly"] = "oz"
+
+    # Warp Oz configuration
+    warp_api_key: str = ""
+    oz_environment_id: str = ""
+    oz_model_id: str = "claude-sonnet-4-5-20250929"
+    oz_poll_interval_seconds: int = 30  # How often to poll Oz for run completion
+
+    # Fly.io configuration (used when execution_backend="fly")
     fly_api_token: str = ""
     fly_app_name: str = ""
     fly_worker_image: str = ""

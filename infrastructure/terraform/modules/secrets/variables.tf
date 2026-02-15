@@ -58,6 +58,13 @@ variable "anthropic_api_key" {
   default     = ""
 }
 
+variable "warp_api_key" {
+  description = "Warp Oz API key for cloud agent runs"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

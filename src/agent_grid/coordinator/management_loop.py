@@ -186,7 +186,10 @@ class ManagementLoop:
         config = ExecutionConfig(repo_url=repo_url, prompt=prompt)
         grid = get_execution_grid()
         try:
-            if hasattr(grid, "launch_agent") and "mode" in grid.launch_agent.__code__.co_varnames:
+            from ..execution_grid.fly_grid import FlyExecutionGrid
+            from ..execution_grid.oz_grid import OzExecutionGrid
+
+            if isinstance(grid, (FlyExecutionGrid, OzExecutionGrid)):
                 kwargs: dict = {"mode": mode, "execution_id": execution_id}
                 if issue_number is not None:
                     kwargs["issue_number"] = issue_number
@@ -416,6 +419,8 @@ class ManagementLoop:
         # Also check pending executions that may have stalled
         pending = await self._db.list_executions(status=ExecutionStatus.PENDING)
 
+        grid = get_execution_grid()
+
         for execution in running + pending:
             ref_time = execution.started_at or execution.created_at
             if not ref_time:
@@ -424,6 +429,11 @@ class ManagementLoop:
             elapsed = (now - ref_time).total_seconds()
             if elapsed > settings.execution_timeout_seconds:
                 logger.warning(f"Execution {execution.id} timed out after {elapsed:.0f}s")
+                # Cancel the actual run (Oz/Fly) so it stops burning compute
+                try:
+                    await grid.cancel_execution(execution.id)
+                except Exception as e:
+                    logger.warning(f"Failed to cancel backend execution {execution.id}: {e}")
                 execution.status = ExecutionStatus.FAILED
                 execution.result = "Timed out"
                 await self._db.update_execution(execution)
