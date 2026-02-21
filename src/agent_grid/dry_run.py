@@ -405,12 +405,17 @@ def install_dry_run_wrappers() -> None:
     import agent_grid.coordinator.pr_monitor as pr_monitor_mod
     import agent_grid.coordinator.scanner as scanner_mod
 
+    import agent_grid.coordinator.proactive_scanner as proactive_scanner_mod
+    import agent_grid.coordinator.quality_gate as quality_gate_mod
+
     scanner_mod._scanner = None
     planner_mod._planner = None
     pr_monitor_mod._pr_monitor = None
     blocker_mod._blocker_resolver = None
     dep_mod._resolver = None
     budget_mod._budget_manager = None
+    quality_gate_mod._quality_gate = None
+    proactive_scanner_mod._proactive_scanner = None
 
     logger.info("Dry-run wrappers installed — writes will be logged, not executed")
 

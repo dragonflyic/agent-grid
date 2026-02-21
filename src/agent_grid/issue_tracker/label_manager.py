@@ -73,6 +73,7 @@ class LabelManager:
             "ag/skipped": "cccccc",
             "ag/sub-issue": "bfdadc",
             "ag/epic": "3e4b9e",
+            "ag/proactive": "7057ff",
         }
         for label, color in label_colors.items():
             try:

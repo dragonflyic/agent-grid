@@ -355,7 +355,9 @@ class Scheduler:
     # -------------------------------------------------------------------------
 
     async def _classify_and_act(self, repo: str, issue_id: str) -> None:
-        """Classify an issue and launch the appropriate agent."""
+        """Classify an issue, run quality gate, and launch the appropriate agent."""
+        from ..config import settings
+
         can_launch, reason = await self._budget_manager.can_launch_agent()
         if not can_launch:
             logger.warning(f"Budget check failed for webhook issue: {reason}")
@@ -385,11 +387,17 @@ class Scheduler:
         loop = get_management_loop()
         labels = get_label_manager()
 
-        if classification.category == "SIMPLE":
-            await loop._launch_simple(repo, issue)
-        elif classification.category == "COMPLEX":
-            await loop._launch_planner(repo, issue)
-        elif classification.category == "BLOCKED":
+        if classification.category == "SKIP":
+            await labels.transition_to(repo, issue.id, "ag/skipped")
+            await tracker.add_comment(
+                repo,
+                issue.id,
+                f"Skipping automated work: {classification.reason}",
+            )
+            logger.info(f"Webhook: Issue #{issue.number}: SKIPPED")
+            return
+
+        if classification.category == "BLOCKED":
             await labels.transition_to(repo, issue.id, "ag/blocked")
             question = classification.blocking_question or classification.reason
             comment = embed_metadata(
@@ -398,13 +406,23 @@ class Scheduler:
             )
             await tracker.add_comment(repo, issue.id, comment)
             logger.info(f"Webhook: Issue #{issue.number}: BLOCKED — posted question")
-        elif classification.category == "SKIP":
-            await labels.transition_to(repo, issue.id, "ag/skipped")
-            await tracker.add_comment(
-                repo,
-                issue.id,
-                f"Skipping automated work: {classification.reason}",
+            return
+
+        # Quality gate for SIMPLE and COMPLEX issues
+        if settings.quality_gate_enabled:
+            gate_result = await loop._run_quality_gate(
+                repo, issue, classification, is_proactive=False
             )
+            if gate_result != "proceed":
+                logger.info(
+                    f"Webhook: Issue #{issue.number}: quality gate {gate_result}"
+                )
+                return
+
+        if classification.category == "SIMPLE":
+            await loop._launch_simple(repo, issue)
+        elif classification.category == "COMPLEX":
+            await loop._launch_planner(repo, issue)
 
         logger.info(f"Webhook: Processed issue #{issue.number} as {classification.category}")
 

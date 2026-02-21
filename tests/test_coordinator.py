@@ -50,13 +50,17 @@ class TestScanner:
 
         ag/sub-issue is excluded so sub-issues created by the planner are
         automatically picked up by the scanner and launched.
+
+        ag/proactive is in HANDLED_LABELS but NOT in AG_LABELS — it's an
+        informational label that persists through transition_to() calls.
         """
         from agent_grid.coordinator.scanner import HANDLED_LABELS
         from agent_grid.issue_tracker.label_manager import AG_LABELS
 
         # ag/todo triggers processing, ag/sub-issue auto-launches after planning
         non_actionable = AG_LABELS - {"ag/todo", "ag/sub-issue"}
-        assert non_actionable == HANDLED_LABELS
+        # ag/proactive is in HANDLED_LABELS but not in AG_LABELS
+        assert non_actionable == HANDLED_LABELS - {"ag/proactive"}
 
 
 class TestDatabaseMethods:
