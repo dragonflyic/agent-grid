@@ -175,6 +175,7 @@ class ManagementLoop:
             repo_url=repo_url,
             status=ExecutionStatus.PENDING,
             prompt=prompt,
+            mode=mode,
             started_at=utc_now(),
         )
 

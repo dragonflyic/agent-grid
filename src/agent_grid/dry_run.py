@@ -163,6 +163,9 @@ class DryRunIssueTracker(GitHubClient):
     async def _remove_label(self, repo: str, issue_id: str, label: str) -> None:
         self._log.log("_remove_label", repo=repo, issue_id=issue_id, label=label)
 
+    async def assign_issue(self, repo: str, issue_id: str, assignee: str) -> None:
+        self._log.log("assign_issue", repo=repo, issue_id=issue_id, assignee=assignee)
+
     async def close(self) -> None:
         await self._real.close()
 

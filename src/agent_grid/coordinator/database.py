@@ -56,8 +56,8 @@ class Database:
         await pool.execute(
             """
             INSERT INTO executions
-            (id, issue_id, repo_url, status, prompt, result, started_at, completed_at, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            (id, issue_id, repo_url, status, prompt, result, mode, started_at, completed_at, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             execution.id,
             issue_id,
@@ -65,6 +65,7 @@ class Database:
             execution.status.value,
             execution.prompt,
             execution.result,
+            execution.mode,
             execution.started_at,
             execution.completed_at,
             execution.created_at,
@@ -84,8 +85,8 @@ class Database:
             result = await pool.fetchval(
                 """
                 INSERT INTO executions
-                (id, issue_id, repo_url, status, prompt, result, started_at, completed_at, created_at)
-                SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+                (id, issue_id, repo_url, status, prompt, result, mode, started_at, completed_at, created_at)
+                SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
                 WHERE NOT EXISTS (
                     SELECT 1 FROM executions
                     WHERE issue_id = $2 AND status IN ('pending', 'running')
@@ -98,6 +99,7 @@ class Database:
                 execution.status.value,
                 execution.prompt,
                 execution.result,
+                execution.mode,
                 execution.started_at,
                 execution.completed_at,
                 execution.created_at,
@@ -202,6 +204,7 @@ class Database:
             status=ExecutionStatus(row["status"]),
             prompt=row["prompt"],
             result=row["result"],
+            mode=row.get("mode"),
             started_at=row["started_at"],
             completed_at=row["completed_at"],
             created_at=row["created_at"],

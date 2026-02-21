@@ -1,5 +1,6 @@
 """GitHub API implementation of issue tracker."""
 
+import logging
 import re
 from datetime import datetime
 
@@ -7,6 +8,8 @@ import httpx
 
 from ..config import settings
 from .public_api import Comment, IssueInfo, IssueStatus, IssueTracker
+
+logger = logging.getLogger("agent_grid.github_client")
 
 
 class GitHubClient(IssueTracker):
@@ -352,6 +355,18 @@ class GitHubClient(IssueTracker):
             pass
         return ""
 
+    async def assign_issue(self, repo: str, issue_id: str, assignee: str) -> None:
+        """Assign an issue to a user."""
+        if not assignee:
+            return
+        try:
+            await self._client.post(
+                f"/repos/{repo}/issues/{issue_id}/assignees",
+                json={"assignees": [assignee]},
+            )
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Failed to assign issue #{issue_id} to {assignee}: {e}")
+
     async def close(self) -> None:
         """Close the HTTP client."""
         await self._client.aclose()
@@ -440,11 +455,16 @@ class GitHubClient(IssueTracker):
         if data.get("updated_at"):
             updated_at = datetime.fromisoformat(data["updated_at"].replace("Z", "+00:00"))
 
+        # Extract author
+        user = data.get("user") or {}
+        author = user.get("login", "")
+
         return IssueInfo(
             id=str(data["number"]),
             number=data["number"],
             title=data["title"],
             body=self._strip_metadata(body) or None,
+            author=author,
             status=status,
             labels=labels,
             repo_url=f"https://github.com/{repo}",

@@ -12,7 +12,10 @@ from ..issue_tracker.public_api import IssueInfo, IssueStatus
 
 logger = logging.getLogger("agent_grid.scanner")
 
-# Labels that indicate an issue is already being handled
+# Labels that indicate an issue is already being handled.
+# Note: ag/sub-issue is intentionally NOT here so sub-issues auto-launch
+# after the planner creates them. Sub-issues with ag/waiting are still
+# blocked because ag/waiting IS in this set.
 HANDLED_LABELS = {
     "ag/in-progress",
     "ag/blocked",
@@ -23,7 +26,6 @@ HANDLED_LABELS = {
     "ag/failed",
     "ag/skipped",
     "ag/epic",
-    "ag/sub-issue",
 }
 
 AG_PREFIX = "ag/"

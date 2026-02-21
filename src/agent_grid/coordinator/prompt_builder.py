@@ -21,6 +21,9 @@ def build_prompt(
     context = context or {}
     branch_name = f"agent/{issue.number}"
 
+    # Owner tag for PR body
+    owner_tag = f"\\n\\ncc @{issue.author} for review" if issue.author else ""
+
     # Format clarification thread if present
     clarification = ""
     if context.get("clarification_comments"):
@@ -56,7 +59,7 @@ Issue #{issue.number}: {issue.title}
      `/ship` with a commit message, PR title, and body that references "Closes #{issue.number}"
    - Otherwise, manually:
      - Push your branch
-     - Create a PR using: gh pr create --title "..." --body "Closes #{issue.number}\\n\\n..."
+     - Create a PR using: gh pr create --title "..." --body "Closes #{issue.number}{owner_tag}\\n\\n..."
      - Link PR to issue: gh pr edit --add-issue #{issue.number}
    - **EXIT immediately after the PR is created.** Do not continue working.
      Your job is done once the PR exists. CI will run automatically.
@@ -78,51 +81,72 @@ Follow any auto-triggered skills (user-invocable: false) — they define the rep
 {issue.body or "(no description)"}
 
 ## Your Task
-Explore the codebase thoroughly, then decompose this issue into small, independent sub-tasks.
+Explore the codebase thoroughly, then create a detailed implementation plan and decompose
+this issue into small, independent sub-tasks that can be executed by coding agents.
 
-### Step 1: Explore
+### Step 1: Deep Exploration
 - Read the README, CLAUDE.md, and key config files (pyproject.toml, package.json, etc.)
-- Understand the architecture and code structure
-- Identify the files and modules relevant to this issue
+- Understand the architecture, code structure, and design patterns used
+- Identify ALL files and modules relevant to this issue
+- Read the actual source code of key files — don't just list them
+- Understand existing tests, how they're structured, and the testing framework used
 
-### Step 2: Plan
-Break the issue into sub-tasks where each sub-task:
-- Can be done in a single PR (< 200 lines changed)
-- Has a clear, specific scope
-- Includes concrete file paths that will need changes
+### Step 2: Architectural Design
+Before creating sub-issues, design the solution:
+- Describe the overall architectural approach and why it's the right choice
+- Identify new data structures, interfaces, or APIs needed
+- Map out how new code integrates with existing modules
+- Identify potential breaking changes or migration needs
+- Note any design trade-offs and your rationale
 
-### Step 3: Create Sub-Issues
+### Step 3: Create Detailed Sub-Issues
 For each sub-task, create a GitHub sub-issue:
 ```bash
 gh issue create --repo {repo} --title "[Sub #{issue.number}] <title>" --body "<body>" --label "ag/sub-issue"
 ```
 
-Each sub-issue body should include:
-- "Part of #{issue.number}" on the first line
-- What to implement and why
-- Specific files to modify
-- Acceptance criteria as a checklist
+**Each sub-issue body MUST include all of the following:**
 
-If a sub-task depends on another, add the label "ag/waiting" too:
+1. **Context**: "Part of #{issue.number}" on the first line
+2. **Objective**: A clear one-paragraph description of what this sub-task accomplishes
+3. **Implementation Details**:
+   - Exact files to create or modify (full paths)
+   - For each file: what functions/methods/classes to add or change
+   - Key logic and algorithms to implement (pseudocode or description)
+   - Data structures and types involved
+   - How this integrates with the rest of the codebase
+4. **Testing Requirements**:
+   - Specific test cases to write
+   - Edge cases to cover
+   - Which test file to add tests to
+5. **Acceptance Criteria**: A checklist of concrete, verifiable items
+6. **Dependencies**: List any sub-tasks that must complete first (by title)
+
+If a sub-task depends on another, add the label "ag/waiting" and note the dependency:
 ```bash
-gh issue create --repo {repo} \
-  --title "[Sub #{issue.number}] <title>" --body "<body>" \
+gh issue create --repo {repo} \\
+  --title "[Sub #{issue.number}] <title>" --body "<body>" \\
   --label "ag/sub-issue" --label "ag/waiting"
 ```
 
 ### Step 4: Post Plan Summary
-After creating all sub-issues, post a summary comment on the parent issue:
+After creating all sub-issues, post a detailed summary comment on the parent issue:
 ```bash
 gh issue comment {issue.number} --repo {repo} --body "## Implementation Plan
 
-<brief summary of approach>
+### Architectural Approach
+<describe the overall design and rationale>
 
-### Sub-tasks
-- #<N>: <title>
-- #<N>: <title>
+### Sub-tasks (in execution order)
+- #<N>: <title> — <one-line description>
+- #<N>: <title> — <one-line description> (depends on #<M>)
 ...
 
-### Risks
+### Key Design Decisions
+- <decision 1 and why>
+- <decision 2 and why>
+
+### Risks & Considerations
 - <any risks or concerns>"
 ```
 
@@ -137,6 +161,10 @@ gh issue edit {issue.number} --repo {repo} --remove-label "ag/planning"
 - Create at most 10 sub-issues.
 - Each sub-task title must start with "[Sub #{issue.number}]".
 - Be specific — reference real file paths you found in the codebase.
+- Each sub-issue must be self-contained enough for another agent to implement
+  without needing to read the parent issue or other sub-issues.
+- Order sub-issues by dependency: independent tasks first, dependent tasks last.
+- Each sub-task should result in a single PR with < 200 lines changed.
 """
 
     elif mode == "implement":
@@ -220,7 +248,7 @@ git checkout -b {new_branch}
 After implementation, push and create a PR:
 ```bash
 git push -u origin {new_branch}
-gh pr create --title "..." --body "Closes #{issue.number}\\n\\n..."
+gh pr create --title "..." --body "Closes #{issue.number}{owner_tag}\\n\\n..."
 ```
 
 **EXIT immediately after the PR is created.** Your job is done. CI will run automatically.
