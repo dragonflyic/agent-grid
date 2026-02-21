@@ -410,13 +410,9 @@ class Scheduler:
 
         # Quality gate for SIMPLE and COMPLEX issues
         if settings.quality_gate_enabled:
-            gate_result = await loop._run_quality_gate(
-                repo, issue, classification, is_proactive=False
-            )
+            gate_result = await loop._run_quality_gate(repo, issue, classification, is_proactive=False)
             if gate_result != "proceed":
-                logger.info(
-                    f"Webhook: Issue #{issue.number}: quality gate {gate_result}"
-                )
+                logger.info(f"Webhook: Issue #{issue.number}: quality gate {gate_result}")
                 return
 
         if classification.category == "SIMPLE":
@@ -527,9 +523,7 @@ class Scheduler:
         # Process any pending nudges now that we have capacity
         await self._process_pending_nudges()
 
-    async def _assign_and_tag_owner(
-        self, repo: str, issue_id: str, pr_number: int | None = None
-    ) -> None:
+    async def _assign_and_tag_owner(self, repo: str, issue_id: str, pr_number: int | None = None) -> None:
         """Assign the issue to its author and tag them for review."""
         tracker = get_issue_tracker()
         try:

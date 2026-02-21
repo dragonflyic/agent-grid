@@ -35,9 +35,7 @@ class ExecutionModel(Base):
     external_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
 
     __table_args__ = (
         Index("idx_executions_issue_id", "issue_id"),
@@ -60,9 +58,7 @@ class NudgeModel(Base):
     issue_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_execution_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
@@ -83,9 +79,7 @@ class BudgetUsageModel(Base):
     execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    recorded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
-    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
 
     __table_args__ = (Index("idx_budget_usage_recorded_at", "recorded_at"),)
 
@@ -101,12 +95,8 @@ class IssueStateModel(Base):
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
 
     __table_args__ = (
         Index("idx_issue_state_classification", "classification"),
@@ -119,6 +109,4 @@ class CronStateModel(Base):
 
     key: Mapped[str] = mapped_column(Text, primary_key=True)
     value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))

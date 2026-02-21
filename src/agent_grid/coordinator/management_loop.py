@@ -123,9 +123,7 @@ class ManagementLoop:
 
             # Quality gate for SIMPLE and COMPLEX issues
             if settings.quality_gate_enabled:
-                gate_result = await self._run_quality_gate(
-                    repo, issue, classification, is_proactive=False
-                )
+                gate_result = await self._run_quality_gate(repo, issue, classification, is_proactive=False)
                 if gate_result == "blocked":
                     continue
                 if gate_result == "skipped":
@@ -499,13 +497,9 @@ class ManagementLoop:
                 await self._tracker.add_comment(
                     repo,
                     issue.id,
-                    f"Skipping: confidence too low ({assessment.score}/10). "
-                    f"{assessment.explanation}",
+                    f"Skipping: confidence too low ({assessment.score}/10). {assessment.explanation}",
                 )
-            logger.info(
-                f"Issue #{issue.number}: quality gate skipped "
-                f"(score={assessment.score}/10)"
-            )
+            logger.info(f"Issue #{issue.number}: quality gate skipped (score={assessment.score}/10)")
             return "skipped"
 
         return "proceed"
@@ -527,10 +521,13 @@ class ManagementLoop:
             return
 
         # Reset cycle count
-        await self._db.set_cron_state("proactive_scan", {
-            "cycle_count": 0,
-            "last_run_at": utc_now().isoformat(),
-        })
+        await self._db.set_cron_state(
+            "proactive_scan",
+            {
+                "cycle_count": 0,
+                "last_run_at": utc_now().isoformat(),
+            },
+        )
 
         logger.info("Phase 8: Running proactive scan")
 
@@ -569,9 +566,7 @@ class ManagementLoop:
                 continue
 
             # Run quality gate with proactive=True (requires high score)
-            gate_result = await self._run_quality_gate(
-                repo, issue, classification, is_proactive=True
-            )
+            gate_result = await self._run_quality_gate(repo, issue, classification, is_proactive=True)
 
             if gate_result != "proceed":
                 # Mark as skipped so we don't re-evaluate next cycle

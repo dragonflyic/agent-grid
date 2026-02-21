@@ -85,18 +85,20 @@ class Database:
     async def create_execution(self, execution: AgentExecution, issue_id: str) -> None:
         """Insert a new execution record."""
         async with self._session() as session:
-            session.add(ExecutionModel(
-                id=execution.id,
-                issue_id=issue_id,
-                repo_url=execution.repo_url,
-                status=execution.status.value,
-                prompt=execution.prompt,
-                result=execution.result,
-                mode=execution.mode,
-                started_at=execution.started_at,
-                completed_at=execution.completed_at,
-                created_at=execution.created_at,
-            ))
+            session.add(
+                ExecutionModel(
+                    id=execution.id,
+                    issue_id=issue_id,
+                    repo_url=execution.repo_url,
+                    status=execution.status.value,
+                    prompt=execution.prompt,
+                    result=execution.result,
+                    mode=execution.mode,
+                    started_at=execution.started_at,
+                    completed_at=execution.completed_at,
+                    created_at=execution.created_at,
+                )
+            )
             await session.commit()
 
     async def try_claim_issue(self, execution: AgentExecution, issue_id: str) -> bool:
@@ -162,9 +164,7 @@ class Database:
     async def get_execution(self, execution_id: UUID) -> AgentExecution | None:
         """Get an execution by ID."""
         async with self._session() as session:
-            result = await session.execute(
-                select(ExecutionModel).where(ExecutionModel.id == execution_id)
-            )
+            result = await session.execute(select(ExecutionModel).where(ExecutionModel.id == execution_id))
             m = result.scalar_one_or_none()
             return self._model_to_execution(m) if m else None
 
@@ -205,9 +205,7 @@ class Database:
     async def get_issue_id_for_execution(self, execution_id: UUID) -> str | None:
         """Get the issue_id associated with an execution."""
         async with self._session() as session:
-            result = await session.execute(
-                select(ExecutionModel.issue_id).where(ExecutionModel.id == execution_id)
-            )
+            result = await session.execute(select(ExecutionModel.issue_id).where(ExecutionModel.id == execution_id))
             row = result.scalar_one_or_none()
             return row
 
@@ -218,14 +216,16 @@ class Database:
     async def create_nudge(self, nudge: NudgeRequest) -> None:
         """Insert a new nudge request."""
         async with self._session() as session:
-            session.add(NudgeModel(
-                id=nudge.id,
-                issue_id=nudge.issue_id,
-                source_execution_id=nudge.source_execution_id,
-                priority=nudge.priority,
-                created_at=nudge.created_at,
-                processed_at=nudge.processed_at,
-            ))
+            session.add(
+                NudgeModel(
+                    id=nudge.id,
+                    issue_id=nudge.issue_id,
+                    source_execution_id=nudge.source_execution_id,
+                    priority=nudge.priority,
+                    created_at=nudge.created_at,
+                    processed_at=nudge.processed_at,
+                )
+            )
             await session.commit()
 
     async def get_pending_nudges(self, limit: int = 10) -> list[NudgeRequest]:
@@ -242,11 +242,7 @@ class Database:
     async def mark_nudge_processed(self, nudge_id: UUID) -> None:
         """Mark a nudge request as processed."""
         async with self._session() as session:
-            await session.execute(
-                update(NudgeModel)
-                .where(NudgeModel.id == nudge_id)
-                .values(processed_at=func.now())
-            )
+            await session.execute(update(NudgeModel).where(NudgeModel.id == nudge_id).values(processed_at=func.now()))
             await session.commit()
 
     # -------------------------------------------------------------------------
@@ -339,8 +335,9 @@ class Database:
         """Get issue state by number and repo."""
         async with self._session() as session:
             result = await session.execute(
-                select(IssueStateModel)
-                .where(IssueStateModel.issue_number == issue_number, IssueStateModel.repo == repo)
+                select(IssueStateModel).where(
+                    IssueStateModel.issue_number == issue_number, IssueStateModel.repo == repo
+                )
             )
             m = result.scalar_one_or_none()
             if m is None:
@@ -430,9 +427,7 @@ class Database:
     async def get_cron_state(self, key: str) -> dict | None:
         """Get a cron state value."""
         async with self._session() as session:
-            result = await session.execute(
-                select(CronStateModel.value).where(CronStateModel.key == key)
-            )
+            result = await session.execute(select(CronStateModel.value).where(CronStateModel.key == key))
             return result.scalar_one_or_none()
 
     async def set_cron_state(self, key: str, value: dict) -> None:
@@ -461,9 +456,7 @@ class Database:
         """Store the backend-specific run ID (e.g. Oz run ID) for an execution."""
         async with self._session() as session:
             await session.execute(
-                update(ExecutionModel)
-                .where(ExecutionModel.id == execution_id)
-                .values(external_run_id=external_run_id)
+                update(ExecutionModel).where(ExecutionModel.id == execution_id).values(external_run_id=external_run_id)
             )
             await session.commit()
 
@@ -475,8 +468,7 @@ class Database:
         """
         async with self._session() as session:
             result = await session.execute(
-                select(ExecutionModel.id, ExecutionModel.external_run_id)
-                .where(
+                select(ExecutionModel.id, ExecutionModel.external_run_id).where(
                     ExecutionModel.status.in_(["pending", "running"]),
                     ExecutionModel.external_run_id.isnot(None),
                 )

@@ -61,8 +61,7 @@ class ProactiveScanner:
             candidates.append(issue)
 
         logger.info(
-            f"Proactive scan {repo}: {len(all_open)} open issues, "
-            f"{len(candidates)} candidates without ag/* labels"
+            f"Proactive scan {repo}: {len(all_open)} open issues, {len(candidates)} candidates without ag/* labels"
         )
         return candidates
 
