@@ -77,6 +77,7 @@ class AgentExecution(BaseModel):
     status: ExecutionStatus = ExecutionStatus.PENDING
     prompt: str | None = None
     result: str | None = None
+    mode: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)

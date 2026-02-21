@@ -80,7 +80,7 @@ class ManagementLoop:
         candidates = await scanner.scan(repo)
         logger.info(f"Phase 1: Found {len(candidates)} candidate issues")
 
-        # Phase 2 + 3: Classify and act
+        # Phase 2 + 3: Classify, quality-gate, and act
         classifier = get_classifier()
         budget = get_budget_manager()
         labels = get_label_manager()
@@ -100,11 +100,17 @@ class ManagementLoop:
                 classification=classification.category,
             )
 
-            if classification.category == "SIMPLE":
-                await self._launch_simple(repo, issue)
-            elif classification.category == "COMPLEX":
-                await self._launch_planner(repo, issue)
-            elif classification.category == "BLOCKED":
+            if classification.category == "SKIP":
+                await labels.transition_to(repo, issue.id, "ag/skipped")
+                await self._tracker.add_comment(
+                    repo,
+                    issue.id,
+                    f"Skipping automated work: {classification.reason}",
+                )
+                logger.info(f"Issue #{issue.number}: SKIPPED — {classification.reason}")
+                continue
+
+            if classification.category == "BLOCKED":
                 await labels.transition_to(repo, issue.id, "ag/blocked")
                 question = classification.blocking_question or classification.reason
                 comment = embed_metadata(
@@ -113,14 +119,20 @@ class ManagementLoop:
                 )
                 await self._tracker.add_comment(repo, issue.id, comment)
                 logger.info(f"Issue #{issue.number}: BLOCKED — posted question")
-            elif classification.category == "SKIP":
-                await labels.transition_to(repo, issue.id, "ag/skipped")
-                await self._tracker.add_comment(
-                    repo,
-                    issue.id,
-                    f"Skipping automated work: {classification.reason}",
-                )
-                logger.info(f"Issue #{issue.number}: SKIPPED — {classification.reason}")
+                continue
+
+            # Quality gate for SIMPLE and COMPLEX issues
+            if settings.quality_gate_enabled:
+                gate_result = await self._run_quality_gate(repo, issue, classification, is_proactive=False)
+                if gate_result == "blocked":
+                    continue
+                if gate_result == "skipped":
+                    continue
+
+            if classification.category == "SIMPLE":
+                await self._launch_simple(repo, issue)
+            elif classification.category == "COMPLEX":
+                await self._launch_planner(repo, issue)
 
         # Phase 4: Monitor in-progress
         await self._check_in_progress(repo)
@@ -151,6 +163,10 @@ class ManagementLoop:
         await dep_resolver.check_dependencies(repo)
         await dep_resolver.check_parent_completion(repo)
 
+        # Phase 8: Proactive scan (runs every N cycles)
+        if settings.proactive_scan_enabled:
+            await self._maybe_run_proactive_scan(repo)
+
         logger.info("=== Cron cycle complete ===")
 
     async def _claim_and_launch(
@@ -175,6 +191,7 @@ class ManagementLoop:
             repo_url=repo_url,
             status=ExecutionStatus.PENDING,
             prompt=prompt,
+            mode=mode,
             started_at=utc_now(),
         )
 
@@ -410,6 +427,200 @@ class ManagementLoop:
         if launched:
             logger.info(f"Issue #{issue_id}: launched CI fix agent for '{check_info.get('check_name')}'")
         return launched
+
+    async def _run_quality_gate(
+        self,
+        repo: str,
+        issue,
+        classification,
+        is_proactive: bool,
+    ) -> str:
+        """Run the quality gate on an issue.
+
+        Returns "proceed", "blocked", or "skipped".
+        """
+        from .quality_gate import get_quality_gate
+
+        quality_gate = get_quality_gate()
+        labels = get_label_manager()
+
+        assessment = await quality_gate.evaluate(
+            issue=issue,
+            classification=classification,
+            is_proactive=is_proactive,
+        )
+
+        # Store assessment in issue_state metadata
+        # Read existing metadata first to avoid overwriting other fields
+        issue_state = await self._db.get_issue_state(issue.number, repo)
+        existing_metadata = (issue_state or {}).get("metadata") or {}
+        if isinstance(existing_metadata, str):
+            import json
+
+            existing_metadata = json.loads(existing_metadata)
+
+        updated_metadata = {
+            **existing_metadata,
+            "confidence_score": assessment.score,
+            "confidence_verdict": assessment.verdict,
+            "risk_flags": assessment.risk_flags,
+            "green_flags": assessment.green_flags,
+        }
+
+        await self._db.upsert_issue_state(
+            issue_number=issue.number,
+            repo=repo,
+            metadata=updated_metadata,
+        )
+
+        if quality_gate.should_clarify(assessment, is_proactive):
+            await labels.transition_to(repo, issue.id, "ag/blocked")
+            question = assessment.clarification_question or assessment.explanation
+            owner_tag = f"@{issue.author} " if issue.author else ""
+            comment = embed_metadata(
+                f"**Agent confidence check — needs clarification:**\n\n"
+                f"{owner_tag}{question}\n\n"
+                f"_Confidence: {assessment.score}/10. "
+                f"Risk flags: {', '.join(assessment.risk_flags)}_",
+                {"type": "blocked", "reason": f"quality_gate: {assessment.explanation}"},
+            )
+            await self._tracker.add_comment(repo, issue.id, comment)
+            logger.info(
+                f"Issue #{issue.number}: quality gate blocked "
+                f"(score={assessment.score}/10, flags={assessment.risk_flags})"
+            )
+            return "blocked"
+
+        if not quality_gate.should_proceed(assessment, is_proactive):
+            if not is_proactive:
+                await labels.transition_to(repo, issue.id, "ag/skipped")
+                await self._tracker.add_comment(
+                    repo,
+                    issue.id,
+                    f"Skipping: confidence too low ({assessment.score}/10). {assessment.explanation}",
+                )
+            logger.info(f"Issue #{issue.number}: quality gate skipped (score={assessment.score}/10)")
+            return "skipped"
+
+        return "proceed"
+
+    async def _maybe_run_proactive_scan(self, repo: str) -> None:
+        """Phase 8: Proactive scan — find unlabeled issues suitable for automation.
+
+        Only runs every N cycles (configured by proactive_scan_every_n_cycles).
+        Uses cron_state to track the cycle count.
+        """
+        from .proactive_scanner import get_proactive_scanner
+
+        # Check if it's time to run
+        cron_state = await self._db.get_cron_state("proactive_scan") or {}
+        cycle_count = cron_state.get("cycle_count", 0) + 1
+
+        if cycle_count < settings.proactive_scan_every_n_cycles:
+            await self._db.set_cron_state("proactive_scan", {"cycle_count": cycle_count})
+            return
+
+        # Reset cycle count
+        await self._db.set_cron_state(
+            "proactive_scan",
+            {
+                "cycle_count": 0,
+                "last_run_at": utc_now().isoformat(),
+            },
+        )
+
+        logger.info("Phase 8: Running proactive scan")
+
+        proactive_scanner = get_proactive_scanner()
+        classifier = get_classifier()
+        budget = get_budget_manager()
+        labels = get_label_manager()
+
+        candidates = await proactive_scanner.scan(repo)
+        picked_up = 0
+
+        for issue in candidates:
+            if picked_up >= settings.proactive_max_per_cycle:
+                break
+
+            can_launch, reason = await budget.can_launch_agent()
+            if not can_launch:
+                logger.info(f"Proactive scan: budget limit reached: {reason}")
+                break
+
+            # Classify first
+            classification = await classifier.classify(issue)
+
+            await self._db.upsert_issue_state(
+                issue_number=issue.number,
+                repo=repo,
+                classification=classification.category,
+            )
+
+            if classification.category in ("BLOCKED", "SKIP"):
+                await self._db.upsert_issue_state(
+                    issue_number=issue.number,
+                    repo=repo,
+                    metadata={"proactive_skipped": True},
+                )
+                continue
+
+            # Run quality gate with proactive=True (requires high score)
+            gate_result = await self._run_quality_gate(repo, issue, classification, is_proactive=True)
+
+            if gate_result != "proceed":
+                # Mark as skipped so we don't re-evaluate next cycle
+                issue_state = await self._db.get_issue_state(issue.number, repo)
+                existing_metadata = (issue_state or {}).get("metadata") or {}
+                if isinstance(existing_metadata, str):
+                    import json
+
+                    existing_metadata = json.loads(existing_metadata)
+                await self._db.upsert_issue_state(
+                    issue_number=issue.number,
+                    repo=repo,
+                    metadata={**existing_metadata, "proactive_skipped": True},
+                )
+                continue
+
+            # Passed the gate — pick it up
+            logger.info(f"Proactive pickup: Issue #{issue.number}")
+
+            # Add ag/proactive as an informational label (persists through transitions)
+            await labels.add_label(repo, issue.id, "ag/proactive")
+
+            # Comment tagging the owner
+            owner_tag = f"@{issue.author}" if issue.author else "the issue author"
+            await self._tracker.add_comment(
+                repo,
+                issue.id,
+                f"I noticed this issue and I'm confident I can handle it. "
+                f"Starting work now — {owner_tag}, I'll tag you for review "
+                f"when the PR is ready.",
+            )
+
+            # Mark as proactively picked
+            issue_state = await self._db.get_issue_state(issue.number, repo)
+            existing_metadata = (issue_state or {}).get("metadata") or {}
+            if isinstance(existing_metadata, str):
+                import json
+
+                existing_metadata = json.loads(existing_metadata)
+            await self._db.upsert_issue_state(
+                issue_number=issue.number,
+                repo=repo,
+                metadata={**existing_metadata, "proactive_picked": True},
+            )
+
+            # Launch agent based on classification
+            if classification.category == "SIMPLE":
+                await self._launch_simple(repo, issue)
+            elif classification.category == "COMPLEX":
+                await self._launch_planner(repo, issue)
+
+            picked_up += 1
+
+        logger.info(f"Phase 8: Proactive scan complete — picked up {picked_up} issues")
 
     async def _check_in_progress(self, repo: str) -> None:
         """Phase 4: Check in-progress executions for timeouts."""

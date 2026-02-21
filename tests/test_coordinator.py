@@ -39,20 +39,28 @@ class TestScanner:
 
         assert "ag/epic" in HANDLED_LABELS
 
-    def test_handled_labels_includes_sub_issue(self):
-        """ag/sub-issue issues must not be re-scanned."""
+    def test_handled_labels_excludes_sub_issue(self):
+        """ag/sub-issue must NOT be in HANDLED_LABELS so sub-issues auto-launch."""
         from agent_grid.coordinator.scanner import HANDLED_LABELS
 
-        assert "ag/sub-issue" in HANDLED_LABELS
+        assert "ag/sub-issue" not in HANDLED_LABELS
 
     def test_handled_labels_covers_all_non_todo_states(self):
-        """Every ag/* label except ag/todo should be in HANDLED_LABELS."""
+        """Every ag/* label except ag/todo and ag/sub-issue should be in HANDLED_LABELS.
+
+        ag/sub-issue is excluded so sub-issues created by the planner are
+        automatically picked up by the scanner and launched.
+
+        ag/proactive is in HANDLED_LABELS but NOT in AG_LABELS — it's an
+        informational label that persists through transition_to() calls.
+        """
         from agent_grid.coordinator.scanner import HANDLED_LABELS
         from agent_grid.issue_tracker.label_manager import AG_LABELS
 
-        # ag/todo is the only label that should trigger processing
-        non_actionable = AG_LABELS - {"ag/todo"}
-        assert non_actionable == HANDLED_LABELS
+        # ag/todo triggers processing, ag/sub-issue auto-launches after planning
+        non_actionable = AG_LABELS - {"ag/todo", "ag/sub-issue"}
+        # ag/proactive is in HANDLED_LABELS but not in AG_LABELS
+        assert non_actionable == HANDLED_LABELS - {"ag/proactive"}
 
 
 class TestDatabaseMethods:

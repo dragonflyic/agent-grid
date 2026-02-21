@@ -78,6 +78,16 @@ class Settings(BaseSettings):
     max_retries_per_issue: int = 2
     max_ci_fix_retries: int = 5
 
+    # Quality gate — confidence check before launching agents
+    quality_gate_enabled: bool = True
+    quality_gate_model: str = "claude-sonnet-4-5-20250929"
+
+    # Proactive scanner — pick up unlabeled issues the agent is confident about
+    proactive_scan_enabled: bool = False  # Off by default, opt-in
+    proactive_scan_every_n_cycles: int = 12  # Every 12th cycle (~12h with 1h loop)
+    proactive_max_per_cycle: int = 3  # Max issues to pick up per proactive scan
+    proactive_min_score: int = 9  # Minimum confidence score (1-10) for proactive pickup
+
     # Dry-run mode — reads from GitHub but logs all writes to file instead
     dry_run: bool = False
     dry_run_output_file: str = "dry_run_output.jsonl"

@@ -50,6 +50,7 @@ class IssueInfo(BaseModel):
     number: int
     title: str
     body: str | None = None
+    author: str = ""
     status: IssueStatus = IssueStatus.OPEN
     labels: list[str] = Field(default_factory=list)
     repo_url: str

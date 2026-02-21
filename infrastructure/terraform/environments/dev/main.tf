@@ -188,23 +188,24 @@ module "ecs_scheduled_task" {
   ecr_image_uri    = "${module.apprunner.ecr_repository_url}:latest"
   cpu              = "512"
   memory           = "1024"
-  schedule_minutes = 30
+  schedule_minutes = 60
 
   subnet_ids         = module.networking.private_subnet_ids
   security_group_ids = [aws_security_group.apprunner_private.id]
   secret_arns        = module.secrets.all_secret_arns
 
   environment_variables = {
-    AGENT_GRID_DEPLOYMENT_MODE     = "coordinator"
-    AGENT_GRID_EXECUTION_BACKEND   = var.execution_backend
-    AGENT_GRID_ISSUE_TRACKER_TYPE  = "github"
-    AGENT_GRID_TARGET_REPO         = var.target_repo
-    AGENT_GRID_OZ_ENVIRONMENT_ID   = var.oz_environment_id
-    AGENT_GRID_FLY_APP_NAME        = var.fly_app_name
-    AGENT_GRID_FLY_WORKER_IMAGE    = var.fly_worker_image
-    AGENT_GRID_DRY_RUN             = var.dry_run ? "true" : "false"
-    PYTHONPATH                     = "/app/src"
-    PYTHONUNBUFFERED                = "1"
+    AGENT_GRID_DEPLOYMENT_MODE           = "coordinator"
+    AGENT_GRID_EXECUTION_BACKEND         = var.execution_backend
+    AGENT_GRID_ISSUE_TRACKER_TYPE        = "github"
+    AGENT_GRID_TARGET_REPO               = var.target_repo
+    AGENT_GRID_OZ_ENVIRONMENT_ID         = var.oz_environment_id
+    AGENT_GRID_FLY_APP_NAME              = var.fly_app_name
+    AGENT_GRID_FLY_WORKER_IMAGE          = var.fly_worker_image
+    AGENT_GRID_DRY_RUN                   = var.dry_run ? "true" : "false"
+    AGENT_GRID_PROACTIVE_SCAN_ENABLED    = "true"
+    PYTHONPATH                           = "/app/src"
+    PYTHONUNBUFFERED                     = "1"
   }
 
   environment_secrets = merge(

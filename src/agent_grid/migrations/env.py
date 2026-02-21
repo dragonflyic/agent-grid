@@ -6,6 +6,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
+from agent_grid.coordinator.models import Base
+
 # this is the Alembic Config object
 config = context.config
 
@@ -44,7 +46,7 @@ def run_migrations_offline() -> None:
     url = get_database_url()
     context.configure(
         url=url,
-        target_metadata=None,
+        target_metadata=Base.metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -73,7 +75,7 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
-            target_metadata=None,
+            target_metadata=Base.metadata,
         )
 
         with context.begin_transaction():

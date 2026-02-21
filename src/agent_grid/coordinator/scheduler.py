@@ -355,7 +355,9 @@ class Scheduler:
     # -------------------------------------------------------------------------
 
     async def _classify_and_act(self, repo: str, issue_id: str) -> None:
-        """Classify an issue and launch the appropriate agent."""
+        """Classify an issue, run quality gate, and launch the appropriate agent."""
+        from ..config import settings
+
         can_launch, reason = await self._budget_manager.can_launch_agent()
         if not can_launch:
             logger.warning(f"Budget check failed for webhook issue: {reason}")
@@ -385,11 +387,17 @@ class Scheduler:
         loop = get_management_loop()
         labels = get_label_manager()
 
-        if classification.category == "SIMPLE":
-            await loop._launch_simple(repo, issue)
-        elif classification.category == "COMPLEX":
-            await loop._launch_planner(repo, issue)
-        elif classification.category == "BLOCKED":
+        if classification.category == "SKIP":
+            await labels.transition_to(repo, issue.id, "ag/skipped")
+            await tracker.add_comment(
+                repo,
+                issue.id,
+                f"Skipping automated work: {classification.reason}",
+            )
+            logger.info(f"Webhook: Issue #{issue.number}: SKIPPED")
+            return
+
+        if classification.category == "BLOCKED":
             await labels.transition_to(repo, issue.id, "ag/blocked")
             question = classification.blocking_question or classification.reason
             comment = embed_metadata(
@@ -398,13 +406,19 @@ class Scheduler:
             )
             await tracker.add_comment(repo, issue.id, comment)
             logger.info(f"Webhook: Issue #{issue.number}: BLOCKED — posted question")
-        elif classification.category == "SKIP":
-            await labels.transition_to(repo, issue.id, "ag/skipped")
-            await tracker.add_comment(
-                repo,
-                issue.id,
-                f"Skipping automated work: {classification.reason}",
-            )
+            return
+
+        # Quality gate for SIMPLE and COMPLEX issues
+        if settings.quality_gate_enabled:
+            gate_result = await loop._run_quality_gate(repo, issue, classification, is_proactive=False)
+            if gate_result != "proceed":
+                logger.info(f"Webhook: Issue #{issue.number}: quality gate {gate_result}")
+                return
+
+        if classification.category == "SIMPLE":
+            await loop._launch_simple(repo, issue)
+        elif classification.category == "COMPLEX":
+            await loop._launch_planner(repo, issue)
 
         logger.info(f"Webhook: Processed issue #{issue.number} as {classification.category}")
 
@@ -489,17 +503,48 @@ class Scheduler:
             if checkpoint and issue_id:
                 await self._db.save_checkpoint(exec_uuid, checkpoint)
 
-            # Update label to review-pending
+            # Update labels based on execution mode
             if issue_id:
                 execution = await self._db.get_execution(exec_uuid)
                 if execution:
                     repo = self._extract_repo_from_url(execution.repo_url)
                     if repo:
                         labels_mgr = get_label_manager()
-                        await labels_mgr.transition_to(repo, issue_id, "ag/review-pending")
+
+                        if execution.mode == "plan":
+                            # Planning done — transition to epic, sub-issues auto-launch
+                            await labels_mgr.transition_to(repo, issue_id, "ag/epic")
+                            logger.info(f"Plan completed for issue #{issue_id} — transitioned to ag/epic")
+                        else:
+                            # Implementation done — mark for review and notify owner
+                            await labels_mgr.transition_to(repo, issue_id, "ag/review-pending")
+                            await self._assign_and_tag_owner(repo, issue_id, pr_number)
 
         # Process any pending nudges now that we have capacity
         await self._process_pending_nudges()
+
+    async def _assign_and_tag_owner(self, repo: str, issue_id: str, pr_number: int | None = None) -> None:
+        """Assign the issue to its author and tag them for review."""
+        tracker = get_issue_tracker()
+        try:
+            issue = await tracker.get_issue(repo, issue_id)
+            if not issue.author:
+                return
+
+            from ..issue_tracker.github_client import GitHubClient
+
+            if isinstance(tracker, GitHubClient):
+                await tracker.assign_issue(repo, issue_id, issue.author)
+
+            pr_ref = f" PR #{pr_number}" if pr_number else ""
+            await tracker.add_comment(
+                repo,
+                issue_id,
+                f"@{issue.author} — implementation is ready for your review.{pr_ref}",
+            )
+            logger.info(f"Issue #{issue_id}: assigned to @{issue.author}")
+        except Exception as e:
+            logger.warning(f"Failed to assign/tag owner for issue #{issue_id}: {e}")
 
     async def _handle_agent_failed(self, event: Event) -> None:
         """Handle agent failure — update labels."""
@@ -575,6 +620,7 @@ class Scheduler:
             repo_url=repo_url,
             status=ExecutionStatus.PENDING,
             prompt=prompt,
+            mode="implement",
             started_at=utc_now(),
         )
         claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)

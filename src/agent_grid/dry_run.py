@@ -163,6 +163,9 @@ class DryRunIssueTracker(GitHubClient):
     async def _remove_label(self, repo: str, issue_id: str, label: str) -> None:
         self._log.log("_remove_label", repo=repo, issue_id=issue_id, label=label)
 
+    async def assign_issue(self, repo: str, issue_id: str, assignee: str) -> None:
+        self._log.log("assign_issue", repo=repo, issue_id=issue_id, assignee=assignee)
+
     async def close(self) -> None:
         await self._real.close()
 
@@ -280,6 +283,12 @@ class DryRunDatabase:
             if result:
                 execution.result = result
 
+    async def set_external_run_id(self, execution_id: UUID, external_run_id: str) -> None:
+        pass
+
+    async def get_active_executions_with_external_run_id(self) -> list[tuple[UUID, str]]:
+        return []
+
     async def record_budget_usage(self, **kwargs) -> None:
         pass
 
@@ -394,6 +403,8 @@ def install_dry_run_wrappers() -> None:
     import agent_grid.coordinator.dependency_resolver as dep_mod
     import agent_grid.coordinator.planner as planner_mod
     import agent_grid.coordinator.pr_monitor as pr_monitor_mod
+    import agent_grid.coordinator.proactive_scanner as proactive_scanner_mod
+    import agent_grid.coordinator.quality_gate as quality_gate_mod
     import agent_grid.coordinator.scanner as scanner_mod
 
     scanner_mod._scanner = None
@@ -402,6 +413,8 @@ def install_dry_run_wrappers() -> None:
     blocker_mod._blocker_resolver = None
     dep_mod._resolver = None
     budget_mod._budget_manager = None
+    quality_gate_mod._quality_gate = None
+    proactive_scanner_mod._proactive_scanner = None
 
     logger.info("Dry-run wrappers installed — writes will be logged, not executed")
 
