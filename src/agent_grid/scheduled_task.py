@@ -37,9 +37,10 @@ async def main() -> int:
         await db.connect()
         logger.info("Database connected")
 
-        pool = db._pool
-        async with pool.acquire() as conn:
-            acquired = await conn.fetchval("SELECT pg_try_advisory_lock(42)")
+        from sqlalchemy import text
+
+        async with db._engine.connect() as conn:
+            acquired = (await conn.execute(text("SELECT pg_try_advisory_lock(42)"))).scalar()
             if not acquired:
                 logger.info("Another cycle is already running, exiting")
                 return 0
@@ -54,8 +55,9 @@ async def main() -> int:
         return 1
     finally:
         if not is_dry_run:
-            async with pool.acquire() as conn:
-                await conn.execute("SELECT pg_advisory_unlock(42)")
+            async with db._engine.connect() as conn:
+                await conn.execute(text("SELECT pg_advisory_unlock(42)"))
+                await conn.commit()
 
             from .fly.machines import get_fly_client
 
