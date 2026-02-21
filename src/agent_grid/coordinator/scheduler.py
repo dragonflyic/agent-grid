@@ -524,7 +524,7 @@ class Scheduler:
         await self._process_pending_nudges()
 
     async def _assign_and_tag_owner(self, repo: str, issue_id: str, pr_number: int | None = None) -> None:
-        """Assign the issue to its author and tag them for review."""
+        """Assign the issue to its author, request PR review, and comment on the PR."""
         tracker = get_issue_tracker()
         try:
             issue = await tracker.get_issue(repo, issue_id)
@@ -536,13 +536,21 @@ class Scheduler:
             if isinstance(tracker, GitHubClient):
                 await tracker.assign_issue(repo, issue_id, issue.author)
 
+                if pr_number:
+                    await tracker.request_pr_reviewers(repo, pr_number, [issue.author])
+                    await tracker.add_pr_comment(
+                        repo,
+                        pr_number,
+                        f"@{issue.author} — this PR is ready for your review.",
+                    )
+
             pr_ref = f" PR #{pr_number}" if pr_number else ""
             await tracker.add_comment(
                 repo,
                 issue_id,
                 f"@{issue.author} — implementation is ready for your review.{pr_ref}",
             )
-            logger.info(f"Issue #{issue_id}: assigned to @{issue.author}")
+            logger.info(f"Issue #{issue_id}: assigned to @{issue.author}, requested review on PR #{pr_number}")
         except Exception as e:
             logger.warning(f"Failed to assign/tag owner for issue #{issue_id}: {e}")
 

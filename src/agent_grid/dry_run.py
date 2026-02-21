@@ -166,6 +166,12 @@ class DryRunIssueTracker(GitHubClient):
     async def assign_issue(self, repo: str, issue_id: str, assignee: str) -> None:
         self._log.log("assign_issue", repo=repo, issue_id=issue_id, assignee=assignee)
 
+    async def request_pr_reviewers(self, repo: str, pr_number: int, reviewers: list[str]) -> None:
+        self._log.log("request_pr_reviewers", repo=repo, pr_number=pr_number, reviewers=reviewers)
+
+    async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
+        self._log.log("add_pr_comment", repo=repo, pr_number=pr_number, body=body[:500])
+
     async def close(self) -> None:
         await self._real.close()
 

@@ -367,6 +367,28 @@ class GitHubClient(IssueTracker):
         except httpx.HTTPStatusError as e:
             logger.warning(f"Failed to assign issue #{issue_id} to {assignee}: {e}")
 
+    async def request_pr_reviewers(self, repo: str, pr_number: int, reviewers: list[str]) -> None:
+        """Request reviewers on a pull request."""
+        if not reviewers:
+            return
+        try:
+            await self._client.post(
+                f"/repos/{repo}/pulls/{pr_number}/requested_reviewers",
+                json={"reviewers": reviewers},
+            )
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Failed to request reviewers on PR #{pr_number}: {e}")
+
+    async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
+        """Post a comment on a pull request."""
+        try:
+            await self._client.post(
+                f"/repos/{repo}/issues/{pr_number}/comments",
+                json={"body": body},
+            )
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Failed to comment on PR #{pr_number}: {e}")
+
     async def close(self) -> None:
         """Close the HTTP client."""
         await self._client.aclose()
