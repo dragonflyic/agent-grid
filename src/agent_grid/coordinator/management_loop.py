@@ -517,7 +517,6 @@ class ManagementLoop:
         Uses cron_state to track the cycle count.
         """
         from .proactive_scanner import get_proactive_scanner
-        from .quality_gate import get_quality_gate
 
         # Check if it's time to run
         cron_state = await self._db.get_cron_state("proactive_scan") or {}
@@ -537,7 +536,6 @@ class ManagementLoop:
 
         proactive_scanner = get_proactive_scanner()
         classifier = get_classifier()
-        quality_gate = get_quality_gate()
         budget = get_budget_manager()
         labels = get_label_manager()
 

@@ -403,10 +403,9 @@ def install_dry_run_wrappers() -> None:
     import agent_grid.coordinator.dependency_resolver as dep_mod
     import agent_grid.coordinator.planner as planner_mod
     import agent_grid.coordinator.pr_monitor as pr_monitor_mod
-    import agent_grid.coordinator.scanner as scanner_mod
-
     import agent_grid.coordinator.proactive_scanner as proactive_scanner_mod
     import agent_grid.coordinator.quality_gate as quality_gate_mod
+    import agent_grid.coordinator.scanner as scanner_mod
 
     scanner_mod._scanner = None
     planner_mod._planner = None

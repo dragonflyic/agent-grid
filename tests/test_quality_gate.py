@@ -1,7 +1,7 @@
 """Tests for the quality gate module."""
 
-from agent_grid.coordinator.quality_gate import ConfidenceAssessment, QualityGate
 from agent_grid.config import settings
+from agent_grid.coordinator.quality_gate import ConfidenceAssessment, QualityGate
 
 
 class TestConfidenceAssessment:
