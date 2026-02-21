@@ -283,6 +283,12 @@ class DryRunDatabase:
             if result:
                 execution.result = result
 
+    async def set_external_run_id(self, execution_id: UUID, external_run_id: str) -> None:
+        pass
+
+    async def get_active_executions_with_external_run_id(self) -> list[tuple[UUID, str]]:
+        return []
+
     async def record_budget_usage(self, **kwargs) -> None:
         pass
 

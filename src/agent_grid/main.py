@@ -125,8 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await fly_client.close()
 
     # Close database connection
-    if db._pool is not None:
-        await db.close()
+    await db.close()
 
 
 app = FastAPI(
