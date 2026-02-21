@@ -43,33 +43,73 @@ class Database:
             await self.connect()
         return self._pool  # type: ignore
 
+    # -------------------------------------------------------------------------
+    # Query helpers — build SQL from dicts so column↔value mapping is obvious
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _build_insert(table: str, data: dict) -> tuple[str, list]:
+        """Build an INSERT query from a dict of {column: value}.
+
+        Returns (sql, params) ready for pool.execute(sql, *params).
+        """
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join(f"${i}" for i in range(1, len(data) + 1))
+        sql = f"INSERT INTO {table} ({cols}) VALUES ({placeholders})"
+        return sql, list(data.values())
+
+    @staticmethod
+    def _build_update(table: str, data: dict, where: dict) -> tuple[str, list]:
+        """Build an UPDATE query from dicts.
+
+        data:  {column: value} for SET clause
+        where: {column: value} for WHERE clause
+
+        Returns (sql, params) ready for pool.execute(sql, *params).
+        """
+        params: list = []
+        idx = 1
+
+        set_parts = []
+        for col, val in data.items():
+            set_parts.append(f"{col} = ${idx}")
+            params.append(val)
+            idx += 1
+
+        where_parts = []
+        for col, val in where.items():
+            where_parts.append(f"{col} = ${idx}")
+            params.append(val)
+            idx += 1
+
+        sql = f"UPDATE {table} SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)}"
+        return sql, params
+
+    # -------------------------------------------------------------------------
     # Execution operations
+    # -------------------------------------------------------------------------
+
+    def _execution_row(self, execution: AgentExecution, issue_id: str) -> dict:
+        """Build column→value dict for an execution INSERT."""
+        return {
+            "id": execution.id,
+            "issue_id": issue_id,
+            "repo_url": execution.repo_url,
+            "status": execution.status.value,
+            "prompt": execution.prompt,
+            "result": execution.result,
+            "mode": execution.mode,
+            "started_at": execution.started_at,
+            "completed_at": execution.completed_at,
+            "created_at": execution.created_at,
+        }
 
     async def create_execution(self, execution: AgentExecution, issue_id: str) -> None:
-        """Insert a new execution record.
-
-        Args:
-            execution: The execution record.
-            issue_id: The issue ID (coordinator's internal tracking).
-        """
+        """Insert a new execution record."""
         pool = await self._get_pool()
-        await pool.execute(
-            """
-            INSERT INTO executions
-            (id, issue_id, repo_url, status, prompt, result, mode, started_at, completed_at, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            """,
-            execution.id,
-            issue_id,
-            execution.repo_url,
-            execution.status.value,
-            execution.prompt,
-            execution.result,
-            execution.mode,
-            execution.started_at,
-            execution.completed_at,
-            execution.created_at,
-        )
+        data = self._execution_row(execution, issue_id)
+        sql, params = self._build_insert("executions", data)
+        await pool.execute(sql, *params)
 
     async def try_claim_issue(self, execution: AgentExecution, issue_id: str) -> bool:
         """Atomically claim an issue for execution, preventing duplicates.
@@ -81,50 +121,42 @@ class Database:
         (idx_executions_active_issue) as a safety net for concurrent claims.
         """
         pool = await self._get_pool()
-        try:
-            result = await pool.fetchval(
-                """
-                INSERT INTO executions
-                (id, issue_id, repo_url, status, prompt, result, mode, started_at, completed_at, created_at)
-                SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM executions
-                    WHERE issue_id = $2 AND status IN ('pending', 'running')
-                )
-                RETURNING id
-                """,
-                execution.id,
-                issue_id,
-                execution.repo_url,
-                execution.status.value,
-                execution.prompt,
-                execution.result,
-                execution.mode,
-                execution.started_at,
-                execution.completed_at,
-                execution.created_at,
+        data = self._execution_row(execution, issue_id)
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join(f"${i}" for i in range(1, len(data) + 1))
+        # $2 is issue_id (second key in _execution_row)
+        issue_id_param = "$2"
+
+        sql = f"""
+            INSERT INTO executions ({cols})
+            SELECT {placeholders}
+            WHERE NOT EXISTS (
+                SELECT 1 FROM executions
+                WHERE issue_id = {issue_id_param} AND status IN ('pending', 'running')
             )
+            RETURNING id
+        """
+        try:
+            result = await pool.fetchval(sql, *data.values())
             return result is not None
         except asyncpg.UniqueViolationError:
-            # Partial unique index caught a concurrent claim race
             return False
 
     async def update_execution(self, execution: AgentExecution) -> None:
         """Update an existing execution record."""
         pool = await self._get_pool()
-        await pool.execute(
-            """
-            UPDATE executions
-            SET status = $2, prompt = $3, result = $4, started_at = $5, completed_at = $6
-            WHERE id = $1
-            """,
-            execution.id,
-            execution.status.value,
-            execution.prompt,
-            execution.result,
-            execution.started_at,
-            execution.completed_at,
+        sql, params = self._build_update(
+            "executions",
+            data={
+                "status": execution.status.value,
+                "prompt": execution.prompt,
+                "result": execution.result,
+                "started_at": execution.started_at,
+                "completed_at": execution.completed_at,
+            },
+            where={"id": execution.id},
         )
+        await pool.execute(sql, *params)
 
     async def get_execution(self, execution_id: UUID) -> AgentExecution | None:
         """Get an execution by ID."""
@@ -210,23 +242,23 @@ class Database:
             created_at=row["created_at"],
         )
 
+    # -------------------------------------------------------------------------
     # Nudge queue operations
+    # -------------------------------------------------------------------------
 
     async def create_nudge(self, nudge: NudgeRequest) -> None:
         """Insert a new nudge request."""
         pool = await self._get_pool()
-        await pool.execute(
-            """
-            INSERT INTO nudge_queue (id, issue_id, source_execution_id, priority, created_at, processed_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            """,
-            nudge.id,
-            nudge.issue_id,
-            nudge.source_execution_id,
-            nudge.priority,
-            nudge.created_at,
-            nudge.processed_at,
-        )
+        data = {
+            "id": nudge.id,
+            "issue_id": nudge.issue_id,
+            "source_execution_id": nudge.source_execution_id,
+            "priority": nudge.priority,
+            "created_at": nudge.created_at,
+            "processed_at": nudge.processed_at,
+        }
+        sql, params = self._build_insert("nudge_queue", data)
+        await pool.execute(sql, *params)
 
     async def get_pending_nudges(self, limit: int = 10) -> list[NudgeRequest]:
         """Get pending nudge requests ordered by priority."""
@@ -245,15 +277,12 @@ class Database:
     async def mark_nudge_processed(self, nudge_id: UUID) -> None:
         """Mark a nudge request as processed."""
         pool = await self._get_pool()
-        await pool.execute(
-            """
-            UPDATE nudge_queue
-            SET processed_at = $2
-            WHERE id = $1
-            """,
-            nudge_id,
-            utc_now(),
+        sql, params = self._build_update(
+            "nudge_queue",
+            data={"processed_at": utc_now()},
+            where={"id": nudge_id},
         )
+        await pool.execute(sql, *params)
 
     def _row_to_nudge(self, row: asyncpg.Record) -> NudgeRequest:
         """Convert a database row to a NudgeRequest."""
@@ -266,7 +295,9 @@ class Database:
             processed_at=row["processed_at"],
         )
 
+    # -------------------------------------------------------------------------
     # Budget tracking operations
+    # -------------------------------------------------------------------------
 
     async def record_budget_usage(
         self,
@@ -276,6 +307,8 @@ class Database:
     ) -> None:
         """Record budget usage for an execution."""
         pool = await self._get_pool()
+        # id uses gen_random_uuid() and recorded_at uses NOW() — both SQL functions,
+        # so this can't use _build_insert
         await pool.execute(
             """
             INSERT INTO budget_usage (id, execution_id, tokens_used, duration_seconds, recorded_at)
@@ -309,7 +342,9 @@ class Database:
             "duration_seconds": row["duration"] if row else 0,
         }
 
+    # -------------------------------------------------------------------------
     # Issue state operations
+    # -------------------------------------------------------------------------
 
     async def upsert_issue_state(
         self,
@@ -323,12 +358,26 @@ class Database:
     ) -> None:
         """Upsert an issue state record."""
         pool = await self._get_pool()
+        data = {
+            "issue_number": issue_number,
+            "repo": repo,
+            "classification": classification,
+            "parent_issue": parent_issue,
+            "sub_issues": sub_issues,
+            "retry_count": retry_count,
+            "metadata": json.dumps(metadata) if metadata is not None else None,
+        }
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join(f"${i}" for i in range(1, len(data) + 1))
+
+        # Positional params follow dict key order:
+        # $1=issue_number, $2=repo, $3=classification, $4=parent_issue,
+        # $5=sub_issues, $6=retry_count, $7=metadata
         await pool.execute(
-            """
+            f"""
             INSERT INTO issue_state
-            (issue_number, repo, classification, parent_issue, sub_issues,
-             retry_count, metadata, last_checked_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+            ({cols}, last_checked_at, updated_at)
+            VALUES ({placeholders}, NOW(), NOW())
             ON CONFLICT (issue_number, repo) DO UPDATE SET
                 classification = COALESCE($3, issue_state.classification),
                 parent_issue = COALESCE($4, issue_state.parent_issue),
@@ -338,13 +387,7 @@ class Database:
                 last_checked_at = NOW(),
                 updated_at = NOW()
             """,
-            issue_number,
-            repo,
-            classification,
-            parent_issue,
-            sub_issues,
-            retry_count,
-            json.dumps(metadata) if metadata is not None else None,
+            *data.values(),
         )
 
     async def get_issue_state(self, issue_number: int, repo: str) -> dict | None:
@@ -373,16 +416,19 @@ class Database:
             )
         return [dict(row) for row in rows]
 
+    # -------------------------------------------------------------------------
     # Checkpoint operations
+    # -------------------------------------------------------------------------
 
     async def save_checkpoint(self, execution_id: UUID, checkpoint: dict) -> None:
         """Save a checkpoint for an execution."""
         pool = await self._get_pool()
-        await pool.execute(
-            "UPDATE executions SET checkpoint = $2 WHERE id = $1",
-            execution_id,
-            json.dumps(checkpoint),
+        sql, params = self._build_update(
+            "executions",
+            data={"checkpoint": json.dumps(checkpoint)},
+            where={"id": execution_id},
         )
+        await pool.execute(sql, *params)
 
     async def get_latest_checkpoint(self, issue_id: str) -> dict | None:
         """Get the most recent checkpoint for an issue."""
@@ -413,7 +459,9 @@ class Database:
         )
         return [dict(row) for row in rows]
 
+    # -------------------------------------------------------------------------
     # Cron state operations
+    # -------------------------------------------------------------------------
 
     async def get_cron_state(self, key: str) -> dict | None:
         """Get a cron state value."""
@@ -435,16 +483,19 @@ class Database:
             json.dumps(value),
         )
 
+    # -------------------------------------------------------------------------
     # Execution updates for new columns
+    # -------------------------------------------------------------------------
 
     async def set_external_run_id(self, execution_id: UUID, external_run_id: str) -> None:
         """Store the backend-specific run ID (e.g. Oz run ID) for an execution."""
         pool = await self._get_pool()
-        await pool.execute(
-            "UPDATE executions SET external_run_id = $2 WHERE id = $1",
-            execution_id,
-            external_run_id,
+        sql, params = self._build_update(
+            "executions",
+            data={"external_run_id": external_run_id},
+            where={"id": execution_id},
         )
+        await pool.execute(sql, *params)
 
     async def get_active_executions_with_external_run_id(self) -> list[tuple[UUID, str]]:
         """Get all pending/running executions that have an external_run_id.
@@ -473,20 +524,26 @@ class Database:
     ) -> None:
         """Update execution with result details."""
         pool = await self._get_pool()
-        await pool.execute(
-            """
-            UPDATE executions
-            SET status = $2, result = $3, pr_number = $4, branch = $5,
-                checkpoint = $6, completed_at = NOW()
-            WHERE id = $1
-            """,
-            execution_id,
-            status.value,
-            result,
-            pr_number,
-            branch,
-            json.dumps(checkpoint) if checkpoint else None,
-        )
+        data = {
+            "status": status.value,
+            "result": result,
+            "pr_number": pr_number,
+            "branch": branch,
+            "checkpoint": json.dumps(checkpoint) if checkpoint else None,
+        }
+        # completed_at uses NOW() so we handle it in raw SQL
+        set_parts = []
+        params: list = []
+        idx = 1
+        for col, val in data.items():
+            set_parts.append(f"{col} = ${idx}")
+            params.append(val)
+            idx += 1
+        set_parts.append("completed_at = NOW()")
+        params.append(execution_id)
+
+        sql = f"UPDATE executions SET {', '.join(set_parts)} WHERE id = ${idx}"
+        await pool.execute(sql, *params)
 
 
 # Global instance
