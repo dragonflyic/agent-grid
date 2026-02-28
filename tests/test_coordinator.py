@@ -305,3 +305,105 @@ class TestCheckRunWebhook:
         await _handle_check_run_event(data)
 
         mock_event_bus.publish.assert_not_called()
+
+
+class TestPlanModePrompt:
+    """Tests for plan-mode prompt with native sub-issue linking."""
+
+    def _make_issue(self, author=""):
+        from agent_grid.issue_tracker.public_api import IssueInfo
+
+        return IssueInfo(
+            id="10",
+            number=10,
+            title="Complex task",
+            body="Needs decomposition",
+            labels=[],
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/10",
+            author=author,
+        )
+
+    def test_plan_prompt_includes_sub_issue_api_linking(self):
+        """Plan prompt must instruct the agent to link via the sub_issues API."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="plan")
+        assert "sub_issues" in prompt
+
+    def test_plan_prompt_includes_blocked_by_format(self):
+        """Plan prompt must document the 'Blocked by:' format for dependency resolver."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="plan")
+        assert "Blocked by:" in prompt
+
+    def test_plan_prompt_includes_author_when_present(self):
+        """Plan prompt includes parent issue author when available."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author="alice"), "owner/repo", mode="plan")
+        assert "@alice" in prompt
+
+    def test_plan_prompt_no_author_when_empty(self):
+        """Plan prompt omits author line when author is empty."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author=""), "owner/repo", mode="plan")
+        assert "Parent issue author:" not in prompt
+
+    def test_plan_prompt_includes_two_step_creation(self):
+        """Plan prompt must show the two-step create-then-link process."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="plan")
+        # Step A: capture issue number
+        assert "--json number --jq .number" in prompt
+        # Step B: API link call
+        assert "gh api --method POST" in prompt
+        assert "repos/owner/repo/issues/10/sub_issues" in prompt
+
+    def test_plan_prompt_includes_assignee_step(self):
+        """Plan prompt must instruct the agent to assign sub-issues."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author="bob"), "owner/repo", mode="plan")
+        assert "--add-assignee bob" in prompt
+
+    def test_plan_prompt_blocked_by_first_line_instruction(self):
+        """Plan prompt must instruct that Blocked by: is the FIRST LINE of the body."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="plan")
+        assert "first line" in prompt.lower() or "FIRST LINE" in prompt
+
+    def test_plan_prompt_does_not_break_other_modes(self):
+        """Other mode prompts must remain unaffected by plan-mode changes."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        issue = self._make_issue(author="alice")
+
+        implement = build_prompt(issue, "owner/repo", mode="implement")
+        assert "git checkout -b agent/10" in implement
+        assert "sub_issues" not in implement
+
+        review = build_prompt(
+            issue, "owner/repo", mode="address_review",
+            context={"pr_number": 5, "review_comments": "fix typo"},
+        )
+        assert "addressing review feedback" in review.lower()
+        assert "sub_issues" not in review
+
+        fix_ci = build_prompt(
+            issue, "owner/repo", mode="fix_ci",
+            context={"pr_number": 5, "check_name": "tests", "check_output": "fail"},
+        )
+        assert "CI check" in fix_ci
+        assert "sub_issues" not in fix_ci
+
+        retry = build_prompt(
+            issue, "owner/repo", mode="retry_with_feedback",
+            context={"closed_pr_number": 3, "human_feedback": "wrong approach"},
+        )
+        assert "previous attempt" in retry.lower()
+        assert "sub_issues" not in retry
