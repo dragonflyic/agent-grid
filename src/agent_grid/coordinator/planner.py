@@ -109,14 +109,15 @@ class Planner:
 
             # Resolve depends_on indices to actual issue numbers
             blocked_by_refs = ""
+            dep_numbers: list[int] = []
             if has_deps:
-                dep_numbers = []
                 for dep_idx in task["depends_on"]:
                     if isinstance(dep_idx, int) and 0 <= dep_idx < len(created_issues):
                         dep_numbers.append(created_issues[dep_idx]["number"])
                 if dep_numbers:
                     refs = ", ".join(f"#{n}" for n in dep_numbers)
                     blocked_by_refs = f"Blocked by: {refs}\n\n"
+                has_deps = bool(dep_numbers)
 
             ac_list = "\n".join(f"- [ ] {ac}" for ac in task.get("acceptance_criteria", []))
             files_list = "\n".join(f"- `{f}`" for f in task.get("estimated_files", []))

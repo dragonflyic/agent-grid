@@ -13,7 +13,9 @@ Runs every N seconds (default 1 hour). Each cycle performs 9 phases:
 """
 
 import asyncio
+import json
 import logging
+import re
 from uuid import uuid4
 
 from ..config import settings
@@ -157,11 +159,43 @@ class ManagementLoop:
 
         ci_monitor = get_ci_monitor()
         ci_failures = await ci_monitor.check_ci_failures(repo)
+        ci_launched = 0
         for check_info in ci_failures:
+            issue_match = re.match(r"agent/(\d+)(?:-|$)", check_info.get("branch", ""))
+            if not issue_match:
+                continue
+            ci_issue_id = issue_match.group(1)
+
+            # Enforce retry limit (same as webhook path)
+            ci_state = await self._db.get_issue_state(int(ci_issue_id), repo)
+            ci_meta = (ci_state or {}).get("metadata") or {}
+            if isinstance(ci_meta, str):
+                ci_meta = json.loads(ci_meta)
+            ci_fix_count = ci_meta.get("ci_fix_count", 0)
+            if ci_fix_count >= settings.max_ci_fix_retries:
+                logger.warning(
+                    f"Issue #{ci_issue_id}: CI fix retry limit "
+                    f"({settings.max_ci_fix_retries}) reached via polling"
+                )
+                continue
+
             check_info = await self._enrich_check_output(repo, check_info)
-            await self._launch_ci_fix(repo, check_info)
-        if ci_failures:
-            logger.info(f"Phase 7: Found {len(ci_failures)} CI failures, launched fix agents")
+            launched = await self._launch_ci_fix(repo, check_info)
+            if launched:
+                # Update dedup cursor + fix count (mirrors webhook path)
+                updated_meta = {
+                    **ci_meta,
+                    "last_ci_check_sha": check_info.get("head_sha", ""),
+                    "ci_fix_count": ci_fix_count + 1,
+                }
+                await self._db.upsert_issue_state(
+                    issue_number=int(ci_issue_id),
+                    repo=repo,
+                    metadata=updated_meta,
+                )
+                ci_launched += 1
+        if ci_launched:
+            logger.info(f"Phase 7: Launched {ci_launched} CI fix agents")
 
         # Phase 8: Resolve blockers — launch agents directly for unblocked issues
         blocker_resolver = get_blocker_resolver()
