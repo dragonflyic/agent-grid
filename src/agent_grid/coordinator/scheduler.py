@@ -374,6 +374,18 @@ class Scheduler:
             repo=repo,
             classification=classification.category,
         )
+        await self._db.record_pipeline_event(
+            issue.number,
+            repo,
+            "classified",
+            "classify",
+            {
+                "category": classification.category,
+                "reason": classification.reason,
+                "estimated_complexity": classification.estimated_complexity,
+                "source": "webhook",
+            },
+        )
 
         from .management_loop import get_management_loop
 

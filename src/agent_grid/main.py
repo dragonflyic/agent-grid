@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 import uvicorn
@@ -11,6 +12,7 @@ from fastapi import FastAPI
 from .config import settings
 from .coordinator import (
     coordinator_router,
+    dashboard_router,
     get_agent_event_logger,
     get_database,
     get_management_loop,
@@ -137,8 +139,12 @@ app = FastAPI(
 
 # Register routers
 app.include_router(coordinator_router)
+app.include_router(dashboard_router)
 app.include_router(webhook_router)
 app.include_router(issues_router)
+
+
+_static_dir = Path(__file__).parent / "static"
 
 
 @app.get("/")
@@ -149,6 +155,14 @@ async def root() -> dict[str, str]:
         "version": "0.1.0",
         "status": "running",
     }
+
+
+@app.get("/dashboard")
+async def serve_dashboard():
+    """Serve the pipeline dashboard UI."""
+    from fastapi.responses import FileResponse
+
+    return FileResponse(_static_dir / "dashboard.html")
 
 
 def run() -> None:

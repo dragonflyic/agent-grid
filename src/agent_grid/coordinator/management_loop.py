@@ -93,6 +93,7 @@ class ManagementLoop:
             can_launch, reason = await budget.can_launch_agent()
             if not can_launch:
                 logger.info(f"Budget limit reached: {reason}. Stopping new assignments.")
+                await self._db.record_pipeline_event(issue.number, repo, "budget_blocked", "launch", {"reason": reason})
                 break
 
             classification = await classifier.classify(issue)
@@ -102,6 +103,17 @@ class ManagementLoop:
                 issue_number=issue.number,
                 repo=repo,
                 classification=classification.category,
+            )
+            await self._db.record_pipeline_event(
+                issue.number,
+                repo,
+                "classified",
+                "classify",
+                {
+                    "category": classification.category,
+                    "reason": classification.reason,
+                    "estimated_complexity": classification.estimated_complexity,
+                },
             )
 
             if classification.category == "SKIP":
@@ -244,6 +256,14 @@ class ManagementLoop:
         claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
         if not claimed:
             logger.info(f"Issue #{issue_id}: already has active execution, skipping")
+            repo = repo_url.replace("https://github.com/", "").replace(".git", "")
+            await self._db.record_pipeline_event(
+                int(issue_id) if issue_id.isdigit() else 0,
+                repo,
+                "launch_failed",
+                "launch",
+                {"reason": "duplicate_execution"},
+            )
             return False
 
         config = ExecutionConfig(repo_url=repo_url, prompt=prompt)
@@ -266,8 +286,25 @@ class ManagementLoop:
             execution.status = ExecutionStatus.FAILED
             execution.result = f"Launch failed: {e}"
             await self._db.update_execution(execution)
+            repo = repo_url.replace("https://github.com/", "").replace(".git", "")
+            await self._db.record_pipeline_event(
+                int(issue_id) if issue_id.isdigit() else 0,
+                repo,
+                "launch_failed",
+                "launch",
+                {"reason": str(e)},
+            )
             return False
 
+        # Record successful launch
+        repo = repo_url.replace("https://github.com/", "").replace(".git", "")
+        await self._db.record_pipeline_event(
+            int(issue_id) if issue_id.isdigit() else 0,
+            repo,
+            "launched",
+            "launch",
+            {"mode": mode, "execution_id": str(execution_id)},
+        )
         return True
 
     async def _has_active_execution(self, issue_id: str) -> bool:
@@ -551,6 +588,13 @@ class ManagementLoop:
                 f"Issue #{issue.number}: quality gate blocked "
                 f"(score={assessment.score}/10, flags={assessment.risk_flags})"
             )
+            await self._db.record_pipeline_event(
+                issue.number,
+                repo,
+                "quality_gate",
+                "quality_gate",
+                {"score": assessment.score, "verdict": "blocked", "risk_flags": assessment.risk_flags},
+            )
             return "blocked"
 
         if not quality_gate.should_proceed(assessment, is_proactive):
@@ -562,8 +606,27 @@ class ManagementLoop:
                     f"Skipping: confidence too low ({assessment.score}/10). {assessment.explanation}",
                 )
             logger.info(f"Issue #{issue.number}: quality gate skipped (score={assessment.score}/10)")
+            await self._db.record_pipeline_event(
+                issue.number,
+                repo,
+                "quality_gate",
+                "quality_gate",
+                {"score": assessment.score, "verdict": "skipped", "is_proactive": is_proactive},
+            )
             return "skipped"
 
+        await self._db.record_pipeline_event(
+            issue.number,
+            repo,
+            "quality_gate",
+            "quality_gate",
+            {
+                "score": assessment.score,
+                "verdict": "proceed",
+                "risk_flags": assessment.risk_flags,
+                "green_flags": assessment.green_flags,
+            },
+        )
         return "proceed"
 
     async def _maybe_run_proactive_scan(self, repo: str) -> None:

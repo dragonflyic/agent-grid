@@ -301,6 +301,59 @@ class DryRunDatabase:
     async def get_total_budget_usage(self, **kwargs) -> dict:
         return {"tokens_used": 0, "duration_seconds": 0}
 
+    # Pipeline events (audit trail)
+
+    async def record_pipeline_event(
+        self, issue_number: int, repo: str, event_type: str, stage: str, detail: dict | None = None
+    ) -> None:
+        if not hasattr(self, "_pipeline_events"):
+            self._pipeline_events = []
+        self._pipeline_events.append(
+            {
+                "id": str(uuid4()),
+                "issue_number": issue_number,
+                "repo": repo,
+                "event_type": event_type,
+                "stage": stage,
+                "detail": detail,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    async def get_pipeline_events(
+        self,
+        repo: str,
+        issue_number: int | None = None,
+        event_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        events = getattr(self, "_pipeline_events", [])
+        events = [e for e in events if e["repo"] == repo]
+        if issue_number is not None:
+            events = [e for e in events if e["issue_number"] == issue_number]
+        if event_type is not None:
+            events = [e for e in events if e["event_type"] == event_type]
+        events.sort(key=lambda e: e["created_at"], reverse=True)
+        return events[offset : offset + limit]
+
+    async def get_pipeline_stats(self, repo: str) -> dict:
+        classifications: dict[str, int] = {}
+        for state in self._issue_states.values():
+            if state.get("repo") == repo:
+                c = state.get("classification") or "unclassified"
+                classifications[c] = classifications.get(c, 0) + 1
+        execution_counts: dict[str, int] = {}
+        for e in self._executions.values():
+            s = e["execution"].status.value if hasattr(e["execution"].status, "value") else str(e["execution"].status)
+            execution_counts[s] = execution_counts.get(s, 0) + 1
+        total = sum(1 for s in self._issue_states.values() if s.get("repo") == repo)
+        return {"classifications": classifications, "execution_counts": execution_counts, "total_tracked_issues": total}
+
+    async def list_all_issue_states(self, repo: str, limit: int = 500, offset: int = 0) -> list[dict]:
+        results = [s for s in self._issue_states.values() if s.get("repo") == repo]
+        return results[offset : offset + limit]
+
 
 class DryRunLabelManager:
     """Intercepts label changes and logs them instead of applying."""

@@ -110,3 +110,25 @@ class CronStateModel(Base):
     key: Mapped[str] = mapped_column(Text, primary_key=True)
     value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+
+class PipelineEventModel(Base):
+    """Audit trail for pipeline decisions — append-only."""
+
+    __tablename__ = "pipeline_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    issue_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    repo: Mapped[str] = mapped_column(Text, nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    stage: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("idx_pipeline_events_issue", "issue_number", "repo"),
+        Index("idx_pipeline_events_type", "event_type"),
+        Index("idx_pipeline_events_repo_created", "repo", "created_at"),
+    )

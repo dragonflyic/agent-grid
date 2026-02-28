@@ -4,6 +4,7 @@ from .blocker_resolver import BlockerResolver, get_blocker_resolver
 from .budget_manager import BudgetManager, get_budget_manager
 from .chat_logger import AgentEventLogger, get_agent_event_logger
 from .classifier import Classifier, get_classifier
+from .dashboard_api import dashboard_router
 from .database import Database, get_database
 from .dependency_resolver import DependencyResolver, get_dependency_resolver
 from .management_loop import ManagementLoop, get_management_loop
@@ -27,8 +28,9 @@ __all__ = [
     "NudgeRequest",
     "NudgeRequestCreate",
     "utc_now",
-    # Public API - Router
+    # Public API - Routers
     "coordinator_router",
+    "dashboard_router",
     # Services
     "Scheduler",
     "get_scheduler",
