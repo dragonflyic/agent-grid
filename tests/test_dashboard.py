@@ -407,3 +407,80 @@ class TestExecutionEventsEndpoint:
             result = await get_execution_events(str(uuid4()))
 
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Active executions listing tests
+# ---------------------------------------------------------------------------
+
+
+class TestListExecutions:
+    @pytest.mark.asyncio
+    async def test_list_all_executions(self):
+        """GET /executions returns all executions."""
+        from agent_grid.coordinator.dashboard_api import list_executions
+
+        db = DryRunDatabase()
+        for issue_id in ["10", "20", "30"]:
+            exec = AgentExecution(
+                id=uuid4(),
+                repo_url="https://github.com/org/repo.git",
+                status=ExecutionStatus.RUNNING,
+                mode="implement",
+            )
+            await db.create_execution(exec, issue_id=issue_id)
+
+        with patch("agent_grid.coordinator.database.get_database", return_value=db):
+            result = await list_executions()
+
+        assert len(result) == 3
+        assert all("issue_id" in r for r in result)
+
+    @pytest.mark.asyncio
+    async def test_filter_by_status(self):
+        """GET /executions?status=running filters by status."""
+        from agent_grid.coordinator.dashboard_api import list_executions
+
+        db = DryRunDatabase()
+        running = AgentExecution(
+            id=uuid4(),
+            repo_url="https://github.com/org/repo.git",
+            status=ExecutionStatus.RUNNING,
+            mode="implement",
+        )
+        completed = AgentExecution(
+            id=uuid4(),
+            repo_url="https://github.com/org/repo.git",
+            status=ExecutionStatus.COMPLETED,
+            mode="implement",
+        )
+        await db.create_execution(running, issue_id="10")
+        await db.create_execution(completed, issue_id="20")
+
+        with patch("agent_grid.coordinator.database.get_database", return_value=db):
+            result = await list_executions(status="running")
+
+        assert len(result) == 1
+        assert result[0]["status"] == "running"
+
+    @pytest.mark.asyncio
+    async def test_truncates_prompt_and_result(self):
+        """Executions list truncates prompt and result to 200 chars."""
+        from agent_grid.coordinator.dashboard_api import list_executions
+
+        db = DryRunDatabase()
+        exec = AgentExecution(
+            id=uuid4(),
+            repo_url="https://github.com/org/repo.git",
+            status=ExecutionStatus.RUNNING,
+            prompt="x" * 500,
+            result="y" * 500,
+            mode="implement",
+        )
+        await db.create_execution(exec, issue_id="10")
+
+        with patch("agent_grid.coordinator.database.get_database", return_value=db):
+            result = await list_executions()
+
+        assert len(result[0]["prompt"]) == 200
+        assert len(result[0]["result"]) == 200

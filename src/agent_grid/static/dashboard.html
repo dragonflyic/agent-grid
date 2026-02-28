@@ -45,17 +45,48 @@ a:hover { text-decoration: underline; }
 .budget-fill { height: 100%; background: var(--accent); transition: width 0.3s; border-radius: 4px; }
 .budget-text { margin-top: 4px; font-size: 12px; color: var(--muted); }
 
+/* Active executions */
+.exec-cards { display: flex; gap: 12px; flex-wrap: wrap; }
+.exec-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 16px; min-width: 280px; flex: 1; max-width: 400px; }
+.exec-card .exec-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.exec-card .exec-issue { font-weight: 700; cursor: pointer; }
+.exec-card .exec-issue:hover { text-decoration: underline; }
+.exec-card .exec-duration { font-family: monospace; font-size: 13px; color: var(--yellow); }
+.exec-card .exec-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.mode-badge { display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 600; }
+.mode-implement { background: #1f3a5f; color: var(--accent); }
+.mode-plan { background: #2d1f3d; color: var(--purple); }
+.mode-address_review { background: #2a1f0b; color: var(--yellow); }
+.mode-fix_ci { background: #3b1d1d; color: var(--red); }
+.mode-retry_with_feedback { background: #2a1f0b; color: var(--yellow); }
+.status-pending { background: #30363d; color: var(--muted); }
+.status-running { background: #1a2b1a; color: var(--green); }
+.oz-btn { display: inline-block; padding: 4px 10px; border-radius: 6px;
+  background: #2d1f3d; color: var(--purple); font-size: 12px; font-weight: 600;
+  text-decoration: none; margin-top: 6px; }
+.oz-btn:hover { opacity: 0.9; text-decoration: none; }
+.no-active { color: var(--muted); font-size: 13px; }
+
 /* Table */
-.controls { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-select, button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+.controls { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+select, button, .search-input { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
   background: var(--bg); color: var(--text); font-size: 13px; cursor: pointer; }
+.search-input { min-width: 180px; cursor: text; }
+.search-input::placeholder { color: var(--muted); }
 button { background: var(--accent); color: #fff; border: none; font-weight: 600; }
 button:hover { opacity: 0.9; }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.secondary { background: transparent; border: 1px solid var(--border); color: var(--muted); font-weight: 400; }
+button.secondary:hover { color: var(--text); border-color: var(--text); }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 8px; border-bottom: 2px solid var(--border);
   color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--text); }
+th .sort-arrow { font-size: 10px; margin-left: 4px; }
 td { padding: 8px; border-bottom: 1px solid var(--border); }
 tr:hover td { background: rgba(88,166,255,0.04); }
 .stage-badge { display: inline-block; padding: 2px 8px; border-radius: 12px;
@@ -107,7 +138,7 @@ tr:hover td { background: rgba(88,166,255,0.04); }
   <h1><span class="health" id="health-dot"></span>Agent Grid Dashboard</h1>
   <div class="meta">
     <span id="repo-name">loading...</span> &middot;
-    Last refresh: <span id="last-refresh">—</span>
+    Last refresh: <span id="last-refresh">&mdash;</span>
     <button onclick="refresh()" style="margin-left: 12px; padding: 4px 10px;">Refresh</button>
   </div>
 </div>
@@ -117,6 +148,14 @@ tr:hover td { background: rgba(88,166,255,0.04); }
   <div class="card full-width">
     <h2>Pipeline Funnel</h2>
     <div class="funnel" id="funnel">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Active executions -->
+  <div class="card full-width">
+    <h2>Active Executions</h2>
+    <div id="exec-content">
       <div class="loading">Loading...</div>
     </div>
   </div>
@@ -137,6 +176,7 @@ tr:hover td { background: rgba(88,166,255,0.04); }
   <div class="card full-width">
     <h2>Issues</h2>
     <div class="controls">
+      <input type="text" class="search-input" id="search-input" placeholder="Search issues..." oninput="debouncedRenderIssues()">
       <select id="stage-filter" onchange="loadIssues()">
         <option value="">All stages</option>
         <option value="unlabeled">Unlabeled</option>
@@ -151,7 +191,12 @@ tr:hover td { background: rgba(88,166,255,0.04); }
         <option value="epic">Epic</option>
         <option value="sub-issue">Sub-Issue</option>
       </select>
-      <button id="activate-btn" onclick="activateSelected()" disabled>Activate Selected</button>
+      <select id="class-filter" onchange="renderIssues()">
+        <option value="">All classifications</option>
+      </select>
+      <button class="secondary" onclick="clearFilters()">Clear</button>
+      <button id="activate-btn" onclick="activateSelected()" disabled
+        title="Add ag/todo label to enter issues into the automated pipeline">Add to Pipeline</button>
       <button onclick="triggerScan()">Trigger Scan</button>
     </div>
     <div style="overflow-x: auto;">
@@ -159,12 +204,12 @@ tr:hover td { background: rgba(88,166,255,0.04); }
         <thead>
           <tr>
             <th><input type="checkbox" id="select-all" onchange="toggleSelectAll()"></th>
-            <th>#</th>
-            <th>Title</th>
-            <th>Stage</th>
-            <th>Classification</th>
-            <th>Confidence</th>
-            <th>Retries</th>
+            <th class="sortable" onclick="sortBy('issue_number')"># <span class="sort-arrow" id="sort-issue_number"></span></th>
+            <th class="sortable" onclick="sortBy('title')">Title <span class="sort-arrow" id="sort-title"></span></th>
+            <th class="sortable" onclick="sortBy('pipeline_stage')">Stage <span class="sort-arrow" id="sort-pipeline_stage"></span></th>
+            <th class="sortable" onclick="sortBy('classification')">Classification <span class="sort-arrow" id="sort-classification"></span></th>
+            <th class="sortable" onclick="sortBy('confidence_score')">Confidence <span class="sort-arrow" id="sort-confidence_score"></span></th>
+            <th class="sortable" onclick="sortBy('retry_count')">Retries <span class="sort-arrow" id="sort-retry_count"></span></th>
           </tr>
         </thead>
         <tbody id="issues-body">
@@ -208,6 +253,12 @@ tr:hover td { background: rgba(88,166,255,0.04); }
 const API = '/api/dashboard';
 let selectedIssues = new Set();
 let currentIssues = [];
+let activeExecs = [];
+let sortColumn = 'issue_number';
+let sortDirection = 'desc';
+let classificationKeys = [];
+let durationInterval = null;
+let execRefreshInterval = null;
 
 async function fetchJSON(url) {
   const resp = await fetch(url);
@@ -216,15 +267,78 @@ async function fetchJSON(url) {
 }
 
 function fmtTime(iso) {
-  if (!iso) return '—';
+  if (!iso) return '\u2014';
   const d = new Date(iso);
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function fmtDuration(startIso) {
+  if (!startIso) return 'pending...';
+  const ms = Date.now() - new Date(startIso).getTime();
+  if (ms < 0) return '0s';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m < 60) return m + 'm ' + rem + 's';
+  const h = Math.floor(m / 60);
+  return h + 'h ' + (m % 60) + 'm';
+}
+
+// ---- Active Executions ----
+
+async function loadExecutions() {
+  try {
+    activeExecs = await fetchJSON(`${API}/executions?status=running`);
+    const pending = await fetchJSON(`${API}/executions?status=pending`);
+    activeExecs = activeExecs.concat(pending);
+    renderExecutions();
+  } catch (e) {
+    document.getElementById('exec-content').innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+function renderExecutions() {
+  const el = document.getElementById('exec-content');
+  if (!activeExecs.length) {
+    el.innerHTML = '<div class="no-active">No active executions</div>';
+    return;
+  }
+  el.innerHTML = '<div class="exec-cards">' + activeExecs.map(ex => {
+    const issueNum = ex.issue_id || '?';
+    const modeClass = 'mode-' + (ex.mode || 'implement');
+    const statusClass = 'status-' + (ex.status || 'pending');
+    let html = `<div class="exec-card">`;
+    html += `<div class="exec-header">
+      <span class="exec-issue" onclick="showDetail(${parseInt(issueNum) || 0})">#${esc(issueNum)}</span>
+      <span class="exec-duration" data-started="${ex.started_at || ''}">${fmtDuration(ex.started_at)}</span>
+    </div>`;
+    html += `<span class="mode-badge ${modeClass}">${esc(ex.mode || 'implement')}</span> `;
+    html += `<span class="mode-badge ${statusClass}">${esc(ex.status || 'pending')}</span>`;
+    if (ex.session_link) {
+      html += `<div><a class="oz-btn" href="${esc(ex.session_link)}" target="_blank">View in Oz</a></div>`;
+    }
+    if (ex.external_run_id) {
+      html += `<div class="exec-meta">Run: ${esc(ex.external_run_id)}</div>`;
+    }
+    html += `</div>`;
+    return html;
+  }).join('') + '</div>';
+}
+
+function updateDurations() {
+  document.querySelectorAll('.exec-duration[data-started]').forEach(el => {
+    const started = el.getAttribute('data-started');
+    if (started) el.textContent = fmtDuration(started);
+  });
+}
+
+// ---- Overview ----
+
 async function loadOverview() {
   try {
     const data = await fetchJSON(`${API}/overview`);
-    document.getElementById('repo-name').textContent = data.repo || '—';
+    document.getElementById('repo-name').textContent = data.repo || '\u2014';
 
     // Funnel
     const labels = data.issues_by_label || {};
@@ -234,11 +348,16 @@ async function loadOverview() {
     const blocked = (labels['ag/blocked'] || 0) + (labels['ag/waiting'] || 0);
     const failed = labels['ag/failed'] || 0;
 
+    const ec = data.execution_counts || {};
+    const running = ec.running || 0;
+    const pending = ec.pending || 0;
+
     document.getElementById('funnel').innerHTML = [
       { num: data.total_open_issues, label: 'Total Open' },
       { num: data.unlabeled_issues, label: 'Unlabeled' },
       { num: data.labeled_issues, label: 'Labeled' },
       { num: inProgress, label: 'In Progress' },
+      { num: running + pending, label: 'Executing' },
       { num: review, label: 'In Review' },
       { num: blocked, label: 'Blocked' },
       { num: done, label: 'Done' },
@@ -256,13 +375,29 @@ async function loadOverview() {
 
     // Classifications
     const cl = data.classifications || {};
+    classificationKeys = Object.keys(cl);
+    populateClassFilter();
     document.getElementById('class-content').innerHTML = Object.entries(cl).length
-      ? Object.entries(cl).map(([k, v]) => `<div>${k}: <strong>${v}</strong></div>`).join('')
+      ? Object.entries(cl).map(([k, v]) => `<div>${esc(k)}: <strong>${v}</strong></div>`).join('')
       : '<div class="loading">No classified issues yet</div>';
   } catch (e) {
-    document.getElementById('funnel').innerHTML = `<div class="error">${e.message}</div>`;
+    document.getElementById('funnel').innerHTML = `<div class="error">${esc(e.message)}</div>`;
   }
 }
+
+function populateClassFilter() {
+  const select = document.getElementById('class-filter');
+  const current = select.value;
+  select.innerHTML = '<option value="">All classifications</option>';
+  classificationKeys.forEach(k => {
+    const opt = document.createElement('option');
+    opt.value = k; opt.textContent = k;
+    select.appendChild(opt);
+  });
+  select.value = current;
+}
+
+// ---- Issues ----
 
 async function loadIssues() {
   const stage = document.getElementById('stage-filter').value;
@@ -273,30 +408,100 @@ async function loadIssues() {
     currentIssues = await fetchJSON(`${API}/issues?${params}`);
     selectedIssues.clear();
     updateActivateBtn();
-
-    const tbody = document.getElementById('issues-body');
-    if (!currentIssues.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="loading">No issues found</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = currentIssues.map(i => `
-      <tr>
-        <td><input type="checkbox" data-num="${i.issue_number}" onchange="toggleSelect(${i.issue_number}, this.checked)"></td>
-        <td><a href="#" onclick="showDetail(${i.issue_number}); return false;">#${i.issue_number}</a></td>
-        <td>${esc(i.title || '')}</td>
-        <td><span class="stage-badge stage-${i.pipeline_stage}">${i.pipeline_stage}</span></td>
-        <td>${i.classification || '—'}</td>
-        <td>${i.confidence_score != null ? i.confidence_score + '/10' : '—'}</td>
-        <td>${i.retry_count || 0}</td>
-      </tr>`).join('');
-
-    document.getElementById('issues-pagination').textContent =
-      `Showing ${currentIssues.length} issues`;
+    renderIssues();
   } catch (e) {
     document.getElementById('issues-body').innerHTML =
-      `<tr><td colspan="7" class="error">${e.message}</td></tr>`;
+      `<tr><td colspan="7" class="error">${esc(e.message)}</td></tr>`;
   }
+}
+
+function getFilteredIssues() {
+  let issues = currentIssues;
+
+  // Classification filter
+  const classVal = document.getElementById('class-filter').value;
+  if (classVal) {
+    issues = issues.filter(i => i.classification === classVal);
+  }
+
+  // Search filter
+  const search = (document.getElementById('search-input').value || '').trim().toLowerCase();
+  if (search) {
+    issues = issues.filter(i =>
+      String(i.issue_number).includes(search) ||
+      (i.title || '').toLowerCase().includes(search)
+    );
+  }
+
+  return issues;
+}
+
+function getSortedIssues(issues) {
+  const col = sortColumn;
+  const dir = sortDirection === 'asc' ? 1 : -1;
+  return [...issues].sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (va == null) va = '';
+    if (vb == null) vb = '';
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+    return String(va).localeCompare(String(vb)) * dir;
+  });
+}
+
+function renderIssues() {
+  const filtered = getFilteredIssues();
+  const sorted = getSortedIssues(filtered);
+
+  // Update sort arrows
+  document.querySelectorAll('.sort-arrow').forEach(el => { el.textContent = ''; });
+  const arrowEl = document.getElementById('sort-' + sortColumn);
+  if (arrowEl) arrowEl.textContent = sortDirection === 'asc' ? '\u25B2' : '\u25BC';
+
+  const tbody = document.getElementById('issues-body');
+  if (!sorted.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">No issues found</td></tr>';
+    document.getElementById('issues-pagination').textContent = '';
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(i => `
+    <tr>
+      <td><input type="checkbox" data-num="${i.issue_number}" onchange="toggleSelect(${i.issue_number}, this.checked)"${selectedIssues.has(i.issue_number) ? ' checked' : ''}></td>
+      <td><a href="#" onclick="showDetail(${i.issue_number}); return false;">#${i.issue_number}</a></td>
+      <td>${esc(i.title || '')}</td>
+      <td><span class="stage-badge stage-${i.pipeline_stage}">${esc(i.pipeline_stage)}</span></td>
+      <td>${esc(i.classification || '\u2014')}</td>
+      <td>${i.confidence_score != null ? i.confidence_score + '/10' : '\u2014'}</td>
+      <td>${i.retry_count || 0}</td>
+    </tr>`).join('');
+
+  document.getElementById('issues-pagination').textContent =
+    `Showing ${sorted.length}` + (sorted.length !== currentIssues.length ? ` of ${currentIssues.length}` : '') + ' issues';
+}
+
+function sortBy(col) {
+  if (sortColumn === col) {
+    sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
+  } else {
+    sortColumn = col;
+    sortDirection = col === 'issue_number' ? 'desc' : 'asc';
+  }
+  renderIssues();
+}
+
+let debounceTimer = null;
+function debouncedRenderIssues() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(renderIssues, 200);
+}
+
+function clearFilters() {
+  document.getElementById('search-input').value = '';
+  document.getElementById('stage-filter').value = '';
+  document.getElementById('class-filter').value = '';
+  sortColumn = 'issue_number';
+  sortDirection = 'desc';
+  loadIssues();
 }
 
 function toggleSelect(num, checked) {
@@ -318,8 +523,8 @@ function updateActivateBtn() {
   const btn = document.getElementById('activate-btn');
   btn.disabled = selectedIssues.size === 0;
   btn.textContent = selectedIssues.size
-    ? `Activate ${selectedIssues.size} Selected`
-    : 'Activate Selected';
+    ? `Add ${selectedIssues.size} to Pipeline`
+    : 'Add to Pipeline';
 }
 
 async function activateSelected() {
@@ -331,7 +536,7 @@ async function activateSelected() {
       body: JSON.stringify({ issue_numbers: [...selectedIssues] }),
     });
     const data = await resp.json();
-    alert(`Activated: ${data.activated?.length || 0} issues`);
+    alert(`Added ${data.activated?.length || 0} issues to pipeline`);
     refresh();
   } catch (e) { alert(`Error: ${e.message}`); }
 }
@@ -339,9 +544,11 @@ async function activateSelected() {
 async function triggerScan() {
   try {
     await fetch(`${API}/actions/scan`, { method: 'POST' });
-    alert('Scan triggered — results will appear in the activity feed.');
+    alert('Scan triggered \u2014 results will appear in the activity feed.');
   } catch (e) { alert(`Error: ${e.message}`); }
 }
+
+// ---- Activity ----
 
 async function loadActivity() {
   const eventType = document.getElementById('event-filter').value;
@@ -358,26 +565,28 @@ async function loadActivity() {
     el.innerHTML = events.map(e => `
       <div class="event">
         <span class="event-time">${fmtTime(e.created_at)}</span>
-        <span class="event-type">${e.event_type}</span>
+        <span class="event-type">${esc(e.event_type)}</span>
         <span style="min-width:50px">#${e.issue_number}</span>
         <span class="event-detail">${summarizeDetail(e)}</span>
       </div>`).join('');
   } catch (e) {
-    document.getElementById('activity-list').innerHTML = `<div class="error">${e.message}</div>`;
+    document.getElementById('activity-list').innerHTML = `<div class="error">${esc(e.message)}</div>`;
   }
 }
 
 function summarizeDetail(e) {
   const d = e.detail || {};
-  if (e.event_type === 'classified') return `${esc(d.category || '')} — ${esc(d.reason || '')}`;
+  if (e.event_type === 'classified') return `${esc(d.category || '')} \u2014 ${esc(d.reason || '')}`;
   if (e.event_type === 'quality_gate') return `score=${esc(String(d.score || ''))}/10, verdict=${esc(d.verdict || '')}`;
   if (e.event_type === 'launched') return `mode=${esc(d.mode || '')}`;
   if (e.event_type === 'launch_failed') return esc(d.reason || '');
   if (e.event_type === 'budget_blocked') return esc(d.reason || '');
   if (e.event_type === 'manual_activate') return 'Added ag/todo';
-  if (e.event_type === 'manual_classify') return `${esc(d.category || '')} — ${esc(d.reason || '')}`;
+  if (e.event_type === 'manual_classify') return `${esc(d.category || '')} \u2014 ${esc(d.reason || '')}`;
   return esc(JSON.stringify(d).slice(0, 100));
 }
+
+// ---- Detail modal ----
 
 async function showDetail(issueNumber) {
   document.getElementById('detail-modal').classList.add('active');
@@ -391,9 +600,9 @@ async function showDetail(issueNumber) {
     const meta = state.metadata || {};
 
     let html = `<h2>#${issueNumber}: ${esc(gh.title || 'Unknown')}</h2>`;
-    html += `<p>Author: ${gh.author || '—'} &middot; Labels: ${(gh.labels || []).join(', ') || '—'}</p>`;
-    html += `<p>Classification: <strong>${state.classification || '—'}</strong> &middot; `;
-    html += `Confidence: ${meta.confidence_score != null ? meta.confidence_score + '/10' : '—'} &middot; `;
+    html += `<p>Author: ${esc(gh.author || '\u2014')} &middot; Labels: ${(gh.labels || []).map(l => esc(l)).join(', ') || '\u2014'}</p>`;
+    html += `<p>Classification: <strong>${esc(state.classification || '\u2014')}</strong> &middot; `;
+    html += `Confidence: ${meta.confidence_score != null ? meta.confidence_score + '/10' : '\u2014'} &middot; `;
     html += `Retries: ${state.retry_count || 0}</p>`;
 
     // Executions
@@ -403,8 +612,8 @@ async function showDetail(issueNumber) {
         const statusClass = ex.status === 'completed' ? 'done' : ex.status === 'failed' ? 'failed' : 'in-progress';
         html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">`;
         html += `<div style="display:flex;justify-content:space-between;align-items:center">
-          <span><strong>${ex.mode || '?'}</strong> <span class="stage-badge stage-${statusClass}">${ex.status}</span></span>
-          <span style="color:var(--muted);font-size:12px">${fmtTime(ex.started_at)} → ${fmtTime(ex.completed_at)}</span>
+          <span><strong>${esc(ex.mode || '?')}</strong> <span class="stage-badge stage-${statusClass}">${esc(ex.status)}</span></span>
+          <span style="color:var(--muted);font-size:12px">${fmtTime(ex.started_at)} \u2192 ${fmtTime(ex.completed_at)}</span>
         </div>`;
 
         // PR/branch info
@@ -412,7 +621,7 @@ async function showDetail(issueNumber) {
           html += `<div style="margin-top:4px">`;
           if (ex.pr_number) {
             const repo = data.repo || '';
-            html += `<a href="https://github.com/${repo}/pull/${ex.pr_number}" target="_blank">PR #${ex.pr_number}</a> `;
+            html += `<a href="https://github.com/${esc(repo)}/pull/${ex.pr_number}" target="_blank">PR #${ex.pr_number}</a> `;
           }
           if (ex.branch) html += `<span style="color:var(--muted);font-size:12px">branch: ${esc(ex.branch)}</span>`;
           html += `</div>`;
@@ -420,8 +629,8 @@ async function showDetail(issueNumber) {
 
         // Session link (Oz) + cost
         if (ex.session_link || ex.cost_cents != null) {
-          html += `<div style="margin-top:4px">`;
-          if (ex.session_link) html += `<a href="${esc(ex.session_link)}" target="_blank" style="color:var(--purple)">View in Oz</a> `;
+          html += `<div style="margin-top:6px;display:flex;align-items:center;gap:12px">`;
+          if (ex.session_link) html += `<a class="oz-btn" href="${esc(ex.session_link)}" target="_blank">View in Oz</a>`;
           if (ex.cost_cents != null) html += `<span style="color:var(--muted);font-size:12px">Cost: $${(ex.cost_cents / 100).toFixed(2)}</span>`;
           html += `</div>`;
         }
@@ -444,7 +653,7 @@ async function showDetail(issueNumber) {
 
         // Execution timeline (lazy-loaded)
         const tlId = 'tl-' + ex.id.replace(/-/g, '').slice(0, 12);
-        html += `<details style="margin-top:4px" ontoggle="if(this.open)loadTimeline('${ex.id}','${tlId}')">
+        html += `<details style="margin-top:4px" ontoggle="if(this.open)loadTimeline('${esc(ex.id)}','${tlId}')">
           <summary style="cursor:pointer;color:var(--accent);font-size:12px">Show execution timeline</summary>
           <div id="${tlId}" style="margin-top:8px;max-height:400px;overflow-y:auto"><div class="loading">Loading...</div></div>
         </details>`;
@@ -459,7 +668,7 @@ async function showDetail(issueNumber) {
       data.pipeline_events.forEach(ev => {
         html += `<div class="timeline-item">
           <span class="time">${fmtTime(ev.created_at)}</span>
-          <span class="type">${ev.event_type}</span>
+          <span class="type">${esc(ev.event_type)}</span>
           <div class="detail">${summarizeDetail(ev)}</div>
         </div>`;
       });
@@ -475,7 +684,7 @@ async function showDetail(issueNumber) {
 
     mc.innerHTML = html;
   } catch (e) {
-    mc.innerHTML = `<div class="error">${e.message}</div>`;
+    mc.innerHTML = `<div class="error">${esc(e.message)}</div>`;
   }
 }
 
@@ -512,27 +721,27 @@ async function loadTimeline(executionId, containerId) {
       return;
     }
     el.innerHTML = events.map(ev => {
-      let icon = '💬';
-      if (ev.message_type === 'tool_use') icon = '🔧';
-      else if (ev.message_type === 'tool_result') icon = '📎';
-      else if (ev.message_type === 'system') icon = '⚙️';
-      else if (ev.message_type === 'result') icon = '🏁';
+      let icon = '\uD83D\uDCAC';
+      if (ev.message_type === 'tool_use') icon = '\uD83D\uDD27';
+      else if (ev.message_type === 'tool_result') icon = '\uD83D\uDCCE';
+      else if (ev.message_type === 'system') icon = '\u2699\uFE0F';
+      else if (ev.message_type === 'result') icon = '\uD83C\uDFC1';
       const label = ev.message_type === 'tool_use' ? (ev.tool_name || 'tool') : ev.message_type;
       const content = ev.content ? esc(ev.content.length > 300 ? ev.content.slice(0, 300) + '...' : ev.content) : '';
       return `<div class="timeline-item">
         <span class="time">${fmtTime(ev.created_at)}</span>
-        <span class="type">${icon} ${label}</span>
+        <span class="type">${icon} ${esc(label)}</span>
         ${content ? `<div class="detail">${content}</div>` : ''}
       </div>`;
     }).join('');
-  } catch (e) { el.innerHTML = `<div class="error">${e.message}</div>`; }
+  } catch (e) { el.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 async function refresh() {
   document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
-  await Promise.all([loadOverview(), loadIssues(), loadActivity()]);
+  await Promise.all([loadOverview(), loadIssues(), loadActivity(), loadExecutions()]);
 }
 
 // Keyboard: Escape closes modal
@@ -541,8 +750,10 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 // Initial load
 refresh();
 
-// Auto-refresh every 60s
+// Auto-refresh: full every 60s, executions every 10s, durations every 1s
 setInterval(refresh, 60000);
+execRefreshInterval = setInterval(loadExecutions, 10000);
+durationInterval = setInterval(updateDurations, 1000);
 </script>
 </body>
 </html>

@@ -200,6 +200,19 @@ async def activity_feed(
     )
 
 
+@dashboard_router.get("/executions")
+async def list_executions(
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """List executions across all issues. Filterable by status."""
+    from .database import get_database
+
+    db = get_database()
+    return await db.list_all_executions_for_dashboard(status=status, limit=limit, offset=offset)
+
+
 @dashboard_router.get("/executions/{execution_id}/events")
 async def get_execution_events(
     execution_id: str,
