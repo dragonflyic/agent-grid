@@ -79,7 +79,7 @@ async def list_issues(
     repo: str | None = None,
     stage: str | None = None,
     classification: str | None = None,
-    limit: int = 100,
+    limit: int = 500,
     offset: int = 0,
 ) -> list[dict]:
     """All open issues merged with DB state. Filterable by stage/classification."""

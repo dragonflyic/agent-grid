@@ -30,6 +30,7 @@ a:hover { text-decoration: underline; }
   letter-spacing: 0.5px; margin-bottom: 12px; }
 
 .full-width { grid-column: 1 / -1; }
+.class-item:hover { color: var(--accent); }
 
 /* Funnel */
 .funnel { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -378,7 +379,7 @@ async function loadOverview() {
     classificationKeys = Object.keys(cl);
     populateClassFilter();
     document.getElementById('class-content').innerHTML = Object.entries(cl).length
-      ? Object.entries(cl).map(([k, v]) => `<div>${esc(k)}: <strong>${v}</strong></div>`).join('')
+      ? Object.entries(cl).map(([k, v]) => `<div class="class-item" style="cursor:pointer;padding:2px 0" onclick="filterByClassification('${esc(k)}')">${esc(k)}: <strong>${v}</strong></div>`).join('')
       : '<div class="loading">No classified issues yet</div>';
   } catch (e) {
     document.getElementById('funnel').innerHTML = `<div class="error">${esc(e.message)}</div>`;
@@ -401,7 +402,7 @@ function populateClassFilter() {
 
 async function loadIssues() {
   const stage = document.getElementById('stage-filter').value;
-  const params = new URLSearchParams({ limit: '200' });
+  const params = new URLSearchParams({ limit: '500' });
   if (stage) params.set('stage', stage);
 
   try {
@@ -493,6 +494,12 @@ let debounceTimer = null;
 function debouncedRenderIssues() {
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(renderIssues, 200);
+}
+
+function filterByClassification(cls) {
+  document.getElementById('class-filter').value = cls;
+  renderIssues();
+  document.getElementById('class-filter').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function clearFilters() {
