@@ -250,15 +250,21 @@ async def _handle_check_run_event(data: dict[str, Any]) -> None:
 
     # Get associated PRs — only care about agent branches
     pull_requests = check_run.get("pull_requests", [])
-    if not pull_requests:
-        return
+    if pull_requests:
+        pr = pull_requests[0]
+        head_branch = pr.get("head", {}).get("ref", "")
+        head_sha = pr.get("head", {}).get("sha", "")
+        pr_number = pr.get("number")
+    else:
+        # Fallback for push-triggered CI (pull_requests is empty)
+        check_suite = check_run.get("check_suite", {})
+        head_branch = check_suite.get("head_branch", "")
+        head_sha = check_run.get("head_sha", "")
+        pr_number = None
 
-    pr = pull_requests[0]
-    head_branch = pr.get("head", {}).get("ref", "")
     if not head_branch.startswith("agent/"):
         return
 
-    head_sha = pr.get("head", {}).get("sha", "")
     repo = data.get("repository", {}).get("full_name", "")
 
     if not repo:
@@ -279,7 +285,7 @@ async def _handle_check_run_event(data: dict[str, Any]) -> None:
         EventType.CHECK_RUN_FAILED,
         {
             "repo": repo,
-            "pr_number": pr.get("number"),
+            "pr_number": pr_number,
             "branch": head_branch,
             "head_sha": head_sha,
             "check_name": check_run.get("name", ""),

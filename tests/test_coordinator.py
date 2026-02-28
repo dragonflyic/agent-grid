@@ -1,6 +1,9 @@
 """Tests for coordinator module."""
 
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
+
+import pytest
 
 from agent_grid.coordinator import NudgeRequest
 
@@ -168,3 +171,137 @@ class TestScheduler:
         prompt = build_prompt(issue, "owner/repo", mode="implement")
         assert "Fix bug" in prompt
         assert "crashes on startup" in prompt
+
+
+class TestCheckRunWebhook:
+    """Tests for _handle_check_run_event webhook handler."""
+
+    @pytest.mark.asyncio
+    @patch("agent_grid.issue_tracker.webhook_handler.event_bus")
+    async def test_check_run_with_pull_requests(self, mock_event_bus):
+        """check_run with pull_requests populated uses PR head ref, sha, and number."""
+        from agent_grid.execution_grid import EventType
+        from agent_grid.issue_tracker.webhook_handler import _handle_check_run_event
+
+        mock_event_bus.publish = AsyncMock()
+
+        data = {
+            "action": "completed",
+            "check_run": {
+                "conclusion": "failure",
+                "name": "ci-test",
+                "id": 111,
+                "html_url": "https://github.com/owner/repo/runs/111",
+                "output": {},
+                "pull_requests": [
+                    {
+                        "number": 99,
+                        "head": {"ref": "agent/42", "sha": "abc123"},
+                    }
+                ],
+            },
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        await _handle_check_run_event(data)
+
+        mock_event_bus.publish.assert_called_once()
+        call_args = mock_event_bus.publish.call_args
+        assert call_args[0][0] == EventType.CHECK_RUN_FAILED
+        payload = call_args[0][1]
+        assert payload["branch"] == "agent/42"
+        assert payload["head_sha"] == "abc123"
+        assert payload["pr_number"] == 99
+        assert payload["repo"] == "owner/repo"
+
+    @pytest.mark.asyncio
+    @patch("agent_grid.issue_tracker.webhook_handler.event_bus")
+    async def test_check_run_fallback_to_check_suite(self, mock_event_bus):
+        """check_run with empty pull_requests falls back to check_suite.head_branch."""
+        from agent_grid.execution_grid import EventType
+        from agent_grid.issue_tracker.webhook_handler import _handle_check_run_event
+
+        mock_event_bus.publish = AsyncMock()
+
+        data = {
+            "action": "completed",
+            "check_run": {
+                "conclusion": "failure",
+                "name": "ci-test",
+                "id": 222,
+                "html_url": "https://github.com/owner/repo/runs/222",
+                "head_sha": "abc123",
+                "output": {},
+                "pull_requests": [],
+                "check_suite": {"head_branch": "agent/42"},
+            },
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        await _handle_check_run_event(data)
+
+        mock_event_bus.publish.assert_called_once()
+        call_args = mock_event_bus.publish.call_args
+        assert call_args[0][0] == EventType.CHECK_RUN_FAILED
+        payload = call_args[0][1]
+        assert payload["branch"] == "agent/42"
+        assert payload["head_sha"] == "abc123"
+        assert payload["pr_number"] is None
+
+    @pytest.mark.asyncio
+    @patch("agent_grid.issue_tracker.webhook_handler.event_bus")
+    async def test_check_run_non_agent_branch_dropped(self, mock_event_bus):
+        """check_run on a non-agent branch (e.g. main) should not publish."""
+        from agent_grid.issue_tracker.webhook_handler import _handle_check_run_event
+
+        mock_event_bus.publish = AsyncMock()
+
+        data = {
+            "action": "completed",
+            "check_run": {
+                "conclusion": "failure",
+                "name": "ci-test",
+                "id": 333,
+                "html_url": "https://github.com/owner/repo/runs/333",
+                "head_sha": "def456",
+                "output": {},
+                "pull_requests": [],
+                "check_suite": {"head_branch": "main"},
+            },
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        await _handle_check_run_event(data)
+
+        mock_event_bus.publish.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("agent_grid.issue_tracker.webhook_handler.event_bus")
+    async def test_check_run_success_conclusion_dropped(self, mock_event_bus):
+        """check_run with conclusion=success should not publish."""
+        from agent_grid.issue_tracker.webhook_handler import _handle_check_run_event
+
+        mock_event_bus.publish = AsyncMock()
+
+        data = {
+            "action": "completed",
+            "check_run": {
+                "conclusion": "success",
+                "name": "ci-test",
+                "id": 444,
+                "html_url": "https://github.com/owner/repo/runs/444",
+                "head_sha": "ghi789",
+                "output": {},
+                "pull_requests": [
+                    {
+                        "number": 10,
+                        "head": {"ref": "agent/7", "sha": "ghi789"},
+                    }
+                ],
+            },
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        await _handle_check_run_event(data)
+
+        mock_event_bus.publish.assert_not_called()
