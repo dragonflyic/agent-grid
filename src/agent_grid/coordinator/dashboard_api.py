@@ -79,10 +79,11 @@ async def list_issues(
     repo: str | None = None,
     stage: str | None = None,
     classification: str | None = None,
-    limit: int = 500,
+    search: str | None = None,
+    limit: int = 50,
     offset: int = 0,
-) -> list[dict]:
-    """All open issues merged with DB state. Filterable by stage/classification."""
+) -> dict:
+    """Paginated open issues merged with DB state. Returns {items, total}."""
     from ..config import settings
     from ..issue_tracker import get_issue_tracker
     from ..issue_tracker.public_api import IssueStatus
@@ -113,6 +114,11 @@ async def list_issues(
         if stage and pipeline_stage != stage:
             continue
 
+        if search:
+            q = search.lower()
+            if q not in (issue.title or "").lower() and q not in str(issue.number):
+                continue
+
         metadata = state.get("metadata") or {}
         results.append(
             {
@@ -132,7 +138,7 @@ async def list_issues(
         )
 
     results.sort(key=lambda x: x["issue_number"], reverse=True)
-    return results[offset : offset + limit]
+    return {"items": results[offset : offset + limit], "total": len(results)}
 
 
 @dashboard_router.get("/issues/{issue_number}")

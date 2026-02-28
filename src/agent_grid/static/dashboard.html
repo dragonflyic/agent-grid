@@ -16,12 +16,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Ar
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+/* 4. Sticky header */
 .header { display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface);
+  position: sticky; top: 0; z-index: 50; }
 .header h1 { font-size: 18px; font-weight: 600; }
-.header .meta { color: var(--muted); font-size: 12px; }
+.header .meta { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .health { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--green); margin-right: 6px; }
+
+/* 3. Auto-refresh progress bar */
+.refresh-bar { height: 2px; background: transparent; position: sticky; top: 49px; z-index: 49; }
+.refresh-bar-fill { height: 100%; width: 0%; background: var(--accent); opacity: 0.6;
+  transition: none; }
+.refresh-bar-fill.animating { transition: width 60s linear; width: 100%; }
 
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 24px; }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
@@ -107,6 +115,15 @@ tr:hover td { background: rgba(88,166,255,0.04); }
 .stage-proactive { background: #1a2b1a; color: var(--green); }
 .stage-labeled-other { background: #30363d; color: var(--muted); }
 
+/* 5. Row quick-actions */
+.row-actions { opacity: 0; transition: opacity 0.15s; white-space: nowrap; }
+tr:hover .row-actions { opacity: 1; }
+.row-actions button { padding: 2px 8px; font-size: 11px; margin-left: 4px; }
+.row-actions .btn-retry { background: transparent; border: 1px solid var(--yellow); color: var(--yellow); }
+.row-actions .btn-classify { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+.row-actions .btn-retry:hover { background: var(--yellow); color: var(--bg); }
+.row-actions .btn-classify:hover { background: var(--accent); color: var(--bg); }
+
 /* Activity */
 .activity-list { max-height: 400px; overflow-y: auto; }
 .event { padding: 8px 0; border-bottom: 1px solid var(--border); display: flex;
@@ -131,6 +148,19 @@ tr:hover td { background: rgba(88,166,255,0.04); }
 
 .loading { color: var(--muted); padding: 20px; text-align: center; }
 .error { color: var(--red); padding: 10px; }
+
+/* 1. Toast notifications */
+.toast-container { position: fixed; top: 60px; right: 16px; z-index: 200;
+  display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast { padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  pointer-events: auto; max-width: 360px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  animation: toastIn 0.25s ease-out; }
+.toast.removing { animation: toastOut 0.2s ease-in forwards; }
+.toast-success { background: #1a2b1a; border: 1px solid var(--green); color: var(--green); }
+.toast-error { background: #3b1d1d; border: 1px solid var(--red); color: var(--red); }
+.toast-info { background: #1f3a5f; border: 1px solid var(--accent); color: var(--accent); }
+@keyframes toastIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(40px); } }
 </style>
 </head>
 <body>
@@ -138,11 +168,17 @@ tr:hover td { background: rgba(88,166,255,0.04); }
 <div class="header">
   <h1><span class="health" id="health-dot"></span>Agent Grid Dashboard</h1>
   <div class="meta">
-    <span id="repo-name">loading...</span> &middot;
-    Last refresh: <span id="last-refresh">&mdash;</span>
-    <button onclick="refresh()" style="margin-left: 12px; padding: 4px 10px;">Refresh</button>
+    <span id="repo-name">loading...</span>
+    <span id="last-refresh" style="font-size:11px"></span>
+    <button onclick="refresh()" style="padding: 4px 10px;">Refresh</button>
   </div>
 </div>
+
+<!-- 3. Auto-refresh progress bar -->
+<div class="refresh-bar"><div class="refresh-bar-fill" id="refresh-bar-fill"></div></div>
+
+<!-- 1. Toast container -->
+<div class="toast-container" id="toast-container"></div>
 
 <div class="grid">
   <!-- Pipeline funnel -->
@@ -178,7 +214,7 @@ tr:hover td { background: rgba(88,166,255,0.04); }
     <h2>Issues</h2>
     <div class="controls">
       <input type="text" class="search-input" id="search-input" placeholder="Search issues..." oninput="debouncedRenderIssues()">
-      <select id="stage-filter" onchange="loadIssues()">
+      <select id="stage-filter" onchange="loadIssues(0)">
         <option value="">All stages</option>
         <option value="unlabeled">Unlabeled</option>
         <option value="todo">Todo</option>
@@ -188,11 +224,10 @@ tr:hover td { background: rgba(88,166,255,0.04); }
         <option value="blocked">Blocked</option>
         <option value="failed">Failed</option>
         <option value="skipped">Skipped</option>
-        <option value="done">Done</option>
         <option value="epic">Epic</option>
         <option value="sub-issue">Sub-Issue</option>
       </select>
-      <select id="class-filter" onchange="renderIssues()">
+      <select id="class-filter" onchange="loadIssues(0)">
         <option value="">All classifications</option>
       </select>
       <button class="secondary" onclick="clearFilters()">Clear</button>
@@ -211,14 +246,15 @@ tr:hover td { background: rgba(88,166,255,0.04); }
             <th class="sortable" onclick="sortBy('classification')">Classification <span class="sort-arrow" id="sort-classification"></span></th>
             <th class="sortable" onclick="sortBy('confidence_score')">Confidence <span class="sort-arrow" id="sort-confidence_score"></span></th>
             <th class="sortable" onclick="sortBy('retry_count')">Retries <span class="sort-arrow" id="sort-retry_count"></span></th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody id="issues-body">
-          <tr><td colspan="7" class="loading">Loading...</td></tr>
+          <tr><td colspan="8" class="loading">Loading...</td></tr>
         </tbody>
       </table>
     </div>
-    <div id="issues-pagination" style="margin-top: 8px; font-size: 12px; color: var(--muted);"></div>
+    <div id="issues-pagination" style="margin-top: 12px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px;"></div>
   </div>
 
   <!-- Activity feed -->
@@ -260,11 +296,48 @@ let sortDirection = 'desc';
 let classificationKeys = [];
 let durationInterval = null;
 let execRefreshInterval = null;
+let issuesTotal = 0;
+let issuesPage = 0;
+const PAGE_SIZE = 50;
+let issuesLoading = false;
 
 async function fetchJSON(url) {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
   return resp.json();
+}
+
+// ---- 1. Toast notification system ----
+
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('removing');
+    setTimeout(() => toast.remove(), 200);
+  }, 4000);
+}
+
+// ---- 2. Relative timestamps ----
+
+function fmtRelative(iso) {
+  if (!iso) return '\u2014';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return 'just now';
+  const s = Math.floor(ms / 1000);
+  if (s < 10) return 'just now';
+  if (s < 60) return s + 's ago';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ago';
+  const d = Math.floor(h / 24);
+  if (d < 7) return d + 'd ago';
+  // Fall back to short date for older
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function fmtTime(iso) {
@@ -284,6 +357,17 @@ function fmtDuration(startIso) {
   if (m < 60) return m + 'm ' + rem + 's';
   const h = Math.floor(m / 60);
   return h + 'h ' + (m % 60) + 'm';
+}
+
+// ---- 3. Auto-refresh progress bar ----
+
+function resetRefreshBar() {
+  const bar = document.getElementById('refresh-bar-fill');
+  bar.classList.remove('animating');
+  bar.style.width = '0%';
+  // Force reflow then start animation
+  void bar.offsetWidth;
+  bar.classList.add('animating');
 }
 
 // ---- Active Executions ----
@@ -345,7 +429,6 @@ async function loadOverview() {
     const labels = data.issues_by_label || {};
     const inProgress = (labels['ag/in-progress'] || 0) + (labels['ag/planning'] || 0);
     const review = labels['ag/review-pending'] || 0;
-    const done = labels['ag/done'] || 0;
     const blocked = (labels['ag/blocked'] || 0) + (labels['ag/waiting'] || 0);
     const failed = labels['ag/failed'] || 0;
 
@@ -361,7 +444,6 @@ async function loadOverview() {
       { num: running + pending, label: 'Executing' },
       { num: review, label: 'In Review' },
       { num: blocked, label: 'Blocked' },
-      { num: done, label: 'Done' },
       { num: failed, label: 'Failed' },
     ].map(i => `<div class="funnel-item${i.num > 0 ? ' highlight' : ''}">
       <div class="num">${i.num}</div><div class="label">${i.label}</div></div>`).join('');
@@ -400,41 +482,34 @@ function populateClassFilter() {
 
 // ---- Issues ----
 
-async function loadIssues() {
+async function loadIssues(page) {
+  if (page !== undefined) issuesPage = page;
+  if (issuesLoading) return;
+  issuesLoading = true;
+
+  const tbody = document.getElementById('issues-body');
+  tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading...</td></tr>';
+
   const stage = document.getElementById('stage-filter').value;
-  const params = new URLSearchParams({ limit: '500' });
+  const classVal = document.getElementById('class-filter').value;
+  const search = (document.getElementById('search-input').value || '').trim();
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(issuesPage * PAGE_SIZE) });
   if (stage) params.set('stage', stage);
+  if (classVal) params.set('classification', classVal);
+  if (search) params.set('search', search);
 
   try {
-    currentIssues = await fetchJSON(`${API}/issues?${params}`);
+    const data = await fetchJSON(`${API}/issues?${params}`);
+    currentIssues = data.items;
+    issuesTotal = data.total;
     selectedIssues.clear();
     updateActivateBtn();
     renderIssues();
   } catch (e) {
-    document.getElementById('issues-body').innerHTML =
-      `<tr><td colspan="7" class="error">${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="error">${esc(e.message)}</td></tr>`;
+  } finally {
+    issuesLoading = false;
   }
-}
-
-function getFilteredIssues() {
-  let issues = currentIssues;
-
-  // Classification filter
-  const classVal = document.getElementById('class-filter').value;
-  if (classVal) {
-    issues = issues.filter(i => i.classification === classVal);
-  }
-
-  // Search filter
-  const search = (document.getElementById('search-input').value || '').trim().toLowerCase();
-  if (search) {
-    issues = issues.filter(i =>
-      String(i.issue_number).includes(search) ||
-      (i.title || '').toLowerCase().includes(search)
-    );
-  }
-
-  return issues;
 }
 
 function getSortedIssues(issues) {
@@ -450,8 +525,7 @@ function getSortedIssues(issues) {
 }
 
 function renderIssues() {
-  const filtered = getFilteredIssues();
-  const sorted = getSortedIssues(filtered);
+  const sorted = getSortedIssues(currentIssues);
 
   // Update sort arrows
   document.querySelectorAll('.sort-arrow').forEach(el => { el.textContent = ''; });
@@ -460,8 +534,8 @@ function renderIssues() {
 
   const tbody = document.getElementById('issues-body');
   if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="loading">No issues found</td></tr>';
-    document.getElementById('issues-pagination').textContent = '';
+    tbody.innerHTML = '<tr><td colspan="8" class="loading">No issues found</td></tr>';
+    document.getElementById('issues-pagination').innerHTML = '';
     return;
   }
 
@@ -474,10 +548,30 @@ function renderIssues() {
       <td>${esc(i.classification || '\u2014')}</td>
       <td>${i.confidence_score != null ? i.confidence_score + '/10' : '\u2014'}</td>
       <td>${i.retry_count || 0}</td>
+      <td><span class="row-actions">
+        <button class="btn-retry" onclick="event.stopPropagation();retryIssue(${i.issue_number})" title="Reset to ag/todo">Retry</button>
+        <button class="btn-classify" onclick="event.stopPropagation();classifyIssue(${i.issue_number})" title="Run classifier">Classify</button>
+      </span></td>
     </tr>`).join('');
 
-  document.getElementById('issues-pagination').textContent =
-    `Showing ${sorted.length}` + (sorted.length !== currentIssues.length ? ` of ${currentIssues.length}` : '') + ' issues';
+  renderPagination();
+}
+
+function renderPagination() {
+  const el = document.getElementById('issues-pagination');
+  const totalPages = Math.max(1, Math.ceil(issuesTotal / PAGE_SIZE));
+  const start = issuesPage * PAGE_SIZE + 1;
+  const end = Math.min((issuesPage + 1) * PAGE_SIZE, issuesTotal);
+  let html = `Showing ${issuesTotal ? start + '\u2013' + end : 0} of ${issuesTotal} issues`;
+  if (totalPages > 1) {
+    html += ` &nbsp; `;
+    html += `<button class="secondary" onclick="loadIssues(0)" ${issuesPage === 0 ? 'disabled' : ''} style="padding:2px 8px">\u00AB</button> `;
+    html += `<button class="secondary" onclick="loadIssues(${issuesPage - 1})" ${issuesPage === 0 ? 'disabled' : ''} style="padding:2px 8px">Prev</button> `;
+    html += `<span style="margin:0 8px">Page ${issuesPage + 1} / ${totalPages}</span>`;
+    html += `<button class="secondary" onclick="loadIssues(${issuesPage + 1})" ${issuesPage >= totalPages - 1 ? 'disabled' : ''} style="padding:2px 8px">Next</button> `;
+    html += `<button class="secondary" onclick="loadIssues(${totalPages - 1})" ${issuesPage >= totalPages - 1 ? 'disabled' : ''} style="padding:2px 8px">\u00BB</button>`;
+  }
+  el.innerHTML = html;
 }
 
 function sortBy(col) {
@@ -493,12 +587,12 @@ function sortBy(col) {
 let debounceTimer = null;
 function debouncedRenderIssues() {
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(renderIssues, 200);
+  debounceTimer = setTimeout(() => loadIssues(0), 300);
 }
 
 function filterByClassification(cls) {
   document.getElementById('class-filter').value = cls;
-  renderIssues();
+  loadIssues(0);
   document.getElementById('class-filter').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -508,7 +602,7 @@ function clearFilters() {
   document.getElementById('class-filter').value = '';
   sortColumn = 'issue_number';
   sortDirection = 'desc';
-  loadIssues();
+  loadIssues(0);
 }
 
 function toggleSelect(num, checked) {
@@ -543,16 +637,18 @@ async function activateSelected() {
       body: JSON.stringify({ issue_numbers: [...selectedIssues] }),
     });
     const data = await resp.json();
-    alert(`Added ${data.activated?.length || 0} issues to pipeline`);
+    const count = data.activated?.length || 0;
+    showToast(`Added ${count} issue${count !== 1 ? 's' : ''} to pipeline`, count ? 'success' : 'info');
+    if (data.errors?.length) showToast(`${data.errors.length} failed`, 'error');
     refresh();
-  } catch (e) { alert(`Error: ${e.message}`); }
+  } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
 }
 
 async function triggerScan() {
   try {
     await fetch(`${API}/actions/scan`, { method: 'POST' });
-    alert('Scan triggered \u2014 results will appear in the activity feed.');
-  } catch (e) { alert(`Error: ${e.message}`); }
+    showToast('Scan triggered', 'info');
+  } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
 }
 
 // ---- Activity ----
@@ -571,7 +667,7 @@ async function loadActivity() {
     }
     el.innerHTML = events.map(e => `
       <div class="event">
-        <span class="event-time">${fmtTime(e.created_at)}</span>
+        <span class="event-time" title="${fmtTime(e.created_at)}">${fmtRelative(e.created_at)}</span>
         <span class="event-type">${esc(e.event_type)}</span>
         <span style="min-width:50px">#${e.issue_number}</span>
         <span class="event-detail">${summarizeDetail(e)}</span>
@@ -620,7 +716,7 @@ async function showDetail(issueNumber) {
         html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">`;
         html += `<div style="display:flex;justify-content:space-between;align-items:center">
           <span><strong>${esc(ex.mode || '?')}</strong> <span class="stage-badge stage-${statusClass}">${esc(ex.status)}</span></span>
-          <span style="color:var(--muted);font-size:12px">${fmtTime(ex.started_at)} \u2192 ${fmtTime(ex.completed_at)}</span>
+          <span style="color:var(--muted);font-size:12px">${fmtRelative(ex.started_at)} \u2192 ${ex.completed_at ? fmtRelative(ex.completed_at) : 'running'}</span>
         </div>`;
 
         // PR/branch info
@@ -674,7 +770,7 @@ async function showDetail(issueNumber) {
       html += `<h3 style="margin-top:16px">Audit Trail</h3>`;
       data.pipeline_events.forEach(ev => {
         html += `<div class="timeline-item">
-          <span class="time">${fmtTime(ev.created_at)}</span>
+          <span class="time" title="${fmtTime(ev.created_at)}">${fmtRelative(ev.created_at)}</span>
           <span class="type">${esc(ev.event_type)}</span>
           <div class="detail">${summarizeDetail(ev)}</div>
         </div>`;
@@ -700,9 +796,9 @@ function closeModal() { document.getElementById('detail-modal').classList.remove
 async function retryIssue(num) {
   try {
     await fetch(`${API}/actions/retry/${num}`, { method: 'POST' });
-    alert(`Issue #${num} reset to ag/todo`);
+    showToast(`Issue #${num} reset to ag/todo`, 'success');
     closeModal(); refresh();
-  } catch (e) { alert(`Error: ${e.message}`); }
+  } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
 }
 
 async function classifyIssue(num) {
@@ -714,9 +810,13 @@ async function classifyIssue(num) {
     });
     const data = await resp.json();
     const r = data.results?.[0];
-    alert(r?.error ? `Error: ${r.error}` : `Classified as ${r?.classification}: ${r?.reason}`);
+    if (r?.error) {
+      showToast(`Error: ${r.error}`, 'error');
+    } else {
+      showToast(`#${num} classified as ${r?.classification}`, 'success');
+    }
     closeModal(); refresh();
-  } catch (e) { alert(`Error: ${e.message}`); }
+  } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
 }
 
 async function loadTimeline(executionId, containerId) {
@@ -736,7 +836,7 @@ async function loadTimeline(executionId, containerId) {
       const label = ev.message_type === 'tool_use' ? (ev.tool_name || 'tool') : ev.message_type;
       const content = ev.content ? esc(ev.content.length > 300 ? ev.content.slice(0, 300) + '...' : ev.content) : '';
       return `<div class="timeline-item">
-        <span class="time">${fmtTime(ev.created_at)}</span>
+        <span class="time" title="${fmtTime(ev.created_at)}">${fmtRelative(ev.created_at)}</span>
         <span class="type">${icon} ${esc(label)}</span>
         ${content ? `<div class="detail">${content}</div>` : ''}
       </div>`;
@@ -747,7 +847,8 @@ async function loadTimeline(executionId, containerId) {
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 async function refresh() {
-  document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
+  document.getElementById('last-refresh').textContent = fmtRelative(new Date().toISOString());
+  resetRefreshBar();
   await Promise.all([loadOverview(), loadIssues(), loadActivity(), loadExecutions()]);
 }
 
