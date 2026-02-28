@@ -414,8 +414,11 @@ def install_dry_run_wrappers() -> None:
     import agent_grid.coordinator.scanner as scanner_mod
 
     import agent_grid.coordinator.ci_monitor as ci_monitor_mod
+    import agent_grid.issue_tracker.project_manager as project_mod
 
     ci_monitor_mod._ci_monitor = None
+    project_mod._project_manager = None
+    settings.github_project_number = None  # Disable Projects in dry-run
     scanner_mod._scanner = None
     planner_mod._planner = None
     pr_monitor_mod._pr_monitor = None

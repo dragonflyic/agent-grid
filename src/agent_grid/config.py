@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     dry_run: bool = False
     dry_run_output_file: str = "dry_run_output.jsonl"
 
+    # GitHub Projects v2 integration
+    github_project_number: int | None = None
+    github_project_owner: str = ""  # org or user login owning the project
+    github_project_label_status_map: str = '{"ag/todo": "Todo", "ag/in-progress": "In Progress", "ag/planning": "In Progress", "ag/review-pending": "In Review", "ag/blocked": "Blocked", "ag/done": "Done", "ag/failed": "Done"}'
+
     # Deployment mode
     deployment_mode: Literal["local", "coordinator"] = "local"
 

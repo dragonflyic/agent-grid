@@ -8,6 +8,7 @@ import logging
 import httpx
 
 from .github_client import GitHubClient
+from .project_manager import get_project_manager
 from .public_api import get_issue_tracker
 
 logger = logging.getLogger("agent_grid.labels")
@@ -48,6 +49,13 @@ class LabelManager:
 
         if new_label not in current_ag_labels:
             await self._github._add_label(repo, issue_id, new_label)
+
+        # Sync to GitHub Projects board (no-op if unconfigured)
+        try:
+            pm = get_project_manager()
+            await pm.sync_status(issue.node_id, new_label)
+        except Exception as e:
+            logger.debug(f"Projects sync skipped for #{issue_id}: {e}")
 
         logger.info(f"Issue #{issue_id}: transitioned to {new_label}")
 
