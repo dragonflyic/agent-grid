@@ -529,8 +529,12 @@ class Database:
             class_result = await session.execute(class_stmt)
             classifications = {row.classification or "unclassified": row.count for row in class_result.all()}
 
-            # Executions by status
-            exec_stmt = select(ExecutionModel.status, func.count().label("count")).group_by(ExecutionModel.status)
+            # Executions by status (filtered by repo)
+            exec_stmt = (
+                select(ExecutionModel.status, func.count().label("count"))
+                .where(ExecutionModel.repo_url.contains(repo))
+                .group_by(ExecutionModel.status)
+            )
             exec_result = await session.execute(exec_stmt)
             execution_counts = {row.status: row.count for row in exec_result.all()}
 
@@ -666,9 +670,7 @@ class Database:
         """Store the Oz session link for an execution."""
         async with self._session() as session:
             await session.execute(
-                update(ExecutionModel)
-                .where(ExecutionModel.id == execution_id)
-                .values(session_link=session_link)
+                update(ExecutionModel).where(ExecutionModel.id == execution_id).values(session_link=session_link)
             )
             await session.commit()
 
@@ -676,9 +678,7 @@ class Database:
         """Store the execution cost in cents."""
         async with self._session() as session:
             await session.execute(
-                update(ExecutionModel)
-                .where(ExecutionModel.id == execution_id)
-                .values(cost_cents=cost_cents)
+                update(ExecutionModel).where(ExecutionModel.id == execution_id).values(cost_cents=cost_cents)
             )
             await session.commit()
 

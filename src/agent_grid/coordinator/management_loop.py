@@ -71,7 +71,7 @@ class ManagementLoop:
             await asyncio.sleep(self._interval)
 
     async def run_cycle(self) -> None:
-        """Run one full cycle of all 7 phases."""
+        """Run one full cycle of all 9 phases."""
         repo = settings.target_repo
         if not repo:
             logger.warning("No target_repo configured, skipping cycle")
@@ -214,14 +214,14 @@ class ManagementLoop:
         for issue in unblocked:
             await self._launch_unblocked(repo, issue)
         if unblocked:
-            logger.info(f"Phase 7: Launched {len(unblocked)} unblocked issues")
+            logger.info(f"Phase 8: Launched {len(unblocked)} unblocked issues")
 
         # Bonus: Check dependency resolution
         dep_resolver = get_dependency_resolver()
         await dep_resolver.check_dependencies(repo)
         await dep_resolver.check_parent_completion(repo)
 
-        # Phase 8: Proactive scan (runs every N cycles)
+        # Phase 9: Proactive scan (runs every N cycles)
         if settings.proactive_scan_enabled:
             await self._maybe_run_proactive_scan(repo)
 
@@ -491,8 +491,6 @@ class ManagementLoop:
 
         Returns True if agent was launched, False otherwise.
         """
-        import re
-
         branch = check_info.get("branch", "")
         match = re.match(r"agent/(\d+)(?:-|$)", branch)
         if not match:
@@ -654,7 +652,7 @@ class ManagementLoop:
             },
         )
 
-        logger.info("Phase 8: Running proactive scan")
+        logger.info("Phase 9: Running proactive scan")
 
         proactive_scanner = get_proactive_scanner()
         classifier = get_classifier()
@@ -745,7 +743,7 @@ class ManagementLoop:
 
             picked_up += 1
 
-        logger.info(f"Phase 8: Proactive scan complete — picked up {picked_up} issues")
+        logger.info(f"Phase 9: Proactive scan complete — picked up {picked_up} issues")
 
     async def _check_in_progress(self, repo: str) -> None:
         """Phase 4: Check in-progress executions for timeouts."""

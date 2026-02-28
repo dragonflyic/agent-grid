@@ -305,9 +305,7 @@ class TestAgentEventsDB:
     async def test_record_and_retrieve(self, db):
         exec_id = uuid4()
         await db.record_agent_event(exec_id, "text", content="Hello world")
-        await db.record_agent_event(
-            exec_id, "tool_use", content='{"command":"ls"}', tool_name="Bash", tool_id="t1"
-        )
+        await db.record_agent_event(exec_id, "tool_use", content='{"command":"ls"}', tool_name="Bash", tool_id="t1")
         await db.record_agent_event(exec_id, "tool_result", content="file1.py", tool_id="t1")
 
         events = await db.get_agent_events(exec_id)

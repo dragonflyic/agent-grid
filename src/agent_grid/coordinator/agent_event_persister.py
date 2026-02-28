@@ -57,9 +57,7 @@ class AgentEventPersister:
                 tool_id=payload.get("tool_id"),
             )
         except Exception:
-            logger.exception(
-                f"Failed to persist agent event for {execution_id_str[:8]}"
-            )
+            logger.exception(f"Failed to persist agent event for {execution_id_str[:8]}")
 
 
 # Global instance

@@ -16,13 +16,10 @@ import re
 from uuid import UUID
 
 from ..execution_grid import (
-    AgentExecution,
     Event,
     EventType,
-    ExecutionConfig,
     ExecutionStatus,
     event_bus,
-    get_execution_grid,
     utc_now,
 )
 from ..issue_tracker import get_issue_tracker
@@ -592,64 +589,43 @@ class Scheduler:
     # Helpers
     # -------------------------------------------------------------------------
 
-    async def _try_launch_agent(self, issue_id: str, repo: str) -> UUID | None:
-        """Attempt to launch an agent for an issue."""
+    async def _try_launch_agent(self, issue_id: str, repo: str) -> bool:
+        """Attempt to launch an agent for an issue.
+
+        Uses _claim_and_launch to claim the DB row FIRST, then launch the machine.
+        """
         logger.info(f"Attempting to launch agent: issue_id={issue_id}, repo={repo}")
 
         can_launch, reason = await self._budget_manager.can_launch_agent()
         if not can_launch:
             logger.warning(f"Budget check failed: {reason}")
-            return None
-
-        existing = await self._db.get_execution_for_issue(issue_id)
-        if existing and existing.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
-            logger.info(f"Execution already active for issue {issue_id}")
-            return None
+            return False
 
         tracker = get_issue_tracker()
         try:
             issue = await tracker.get_issue(repo, issue_id)
         except Exception as e:
             logger.error(f"Failed to get issue {issue_id} from {repo}: {e}")
-            return None
+            return False
 
         prompt = build_prompt(issue, repo, mode="implement")
-
         repo_url = f"https://github.com/{repo}.git"
-        config = ExecutionConfig(
+
+        from .management_loop import get_management_loop
+
+        loop = get_management_loop()
+        launched = await loop._claim_and_launch(
+            issue_id=issue_id,
             repo_url=repo_url,
-            prompt=prompt,
-        )
-
-        grid = get_execution_grid()
-
-        from ..execution_grid.fly_grid import FlyExecutionGrid
-        from ..execution_grid.oz_grid import OzExecutionGrid
-
-        if isinstance(grid, (FlyExecutionGrid, OzExecutionGrid)):
-            execution_id = await grid.launch_agent(
-                config,
-                mode="implement",
-                issue_number=issue.number,
-            )
-        else:
-            execution_id = await grid.launch_agent(config)
-
-        execution = AgentExecution(
-            id=execution_id,
-            repo_url=repo_url,
-            status=ExecutionStatus.PENDING,
             prompt=prompt,
             mode="implement",
-            started_at=utc_now(),
+            issue_number=issue.number,
         )
-        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
-        if not claimed:
-            logger.info(f"Lost claim race for issue {issue_id}")
-            return None
-        logger.info(f"Launched agent {execution_id} for issue {issue_id}")
+        if not launched:
+            return False
 
-        return execution_id
+        logger.info(f"Launched agent for issue {issue_id}")
+        return True
 
     async def _process_pending_nudges(self) -> None:
         """Process pending nudge requests."""

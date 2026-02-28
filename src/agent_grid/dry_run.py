@@ -185,6 +185,8 @@ class DryRunDatabase:
         self._issue_states: dict[tuple[int, str], dict] = {}
         self._cron_state: dict[str, dict] = {}
         self._checkpoints: dict[str, dict] = {}
+        self._pipeline_events: list[dict] = []
+        self._agent_events: list[dict] = []
 
     async def connect(self) -> None:
         pass
@@ -284,9 +286,9 @@ class DryRunDatabase:
     ) -> None:
         if execution_id in self._executions:
             execution = self._executions[execution_id]["execution"]
-            if status:
+            if status is not None:
                 execution.status = status
-            if result:
+            if result is not None:
                 execution.result = result
 
     async def set_external_run_id(self, execution_id: UUID, external_run_id: str) -> None:
@@ -306,8 +308,6 @@ class DryRunDatabase:
     async def record_pipeline_event(
         self, issue_number: int, repo: str, event_type: str, stage: str, detail: dict | None = None
     ) -> None:
-        if not hasattr(self, "_pipeline_events"):
-            self._pipeline_events = []
         self._pipeline_events.append(
             {
                 "id": str(uuid4()),
@@ -328,7 +328,7 @@ class DryRunDatabase:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
-        events = getattr(self, "_pipeline_events", [])
+        events = self._pipeline_events
         events = [e for e in events if e["repo"] == repo]
         if issue_number is not None:
             events = [e for e in events if e["issue_number"] == issue_number]
@@ -345,6 +345,9 @@ class DryRunDatabase:
                 classifications[c] = classifications.get(c, 0) + 1
         execution_counts: dict[str, int] = {}
         for e in self._executions.values():
+            # Filter by repo (repo_url is like "https://github.com/org/repo.git")
+            if repo not in (e["execution"].repo_url or ""):
+                continue
             s = e["execution"].status.value if hasattr(e["execution"].status, "value") else str(e["execution"].status)
             execution_counts[s] = execution_counts.get(s, 0) + 1
         total = sum(1 for s in self._issue_states.values() if s.get("repo") == repo)
@@ -364,8 +367,6 @@ class DryRunDatabase:
         tool_name: str | None = None,
         tool_id: str | None = None,
     ) -> None:
-        if not hasattr(self, "_agent_events"):
-            self._agent_events: list[dict] = []
         self._agent_events.append(
             {
                 "id": str(uuid4()),
@@ -384,7 +385,7 @@ class DryRunDatabase:
         limit: int = 500,
         offset: int = 0,
     ) -> list[dict]:
-        events = getattr(self, "_agent_events", [])
+        events = self._agent_events
         filtered = [e for e in events if e["execution_id"] == str(execution_id)]
         filtered.sort(key=lambda e: e["created_at"])
         return filtered[offset : offset + limit]
@@ -457,8 +458,9 @@ class DryRunExecutionGrid(ExecutionGrid):
         mode: str = "implement",
         issue_number: int | None = None,
         context: dict | None = None,
+        execution_id: UUID | None = None,
     ) -> UUID:
-        execution_id = uuid4()
+        execution_id = execution_id or uuid4()
         self._log.log(
             "launch_agent",
             execution_id=execution_id,
@@ -522,6 +524,10 @@ def install_dry_run_wrappers() -> None:
     # Replace execution grid
     grid_service._service = None
     grid_service._fly_grid = DryRunExecutionGrid()
+    # Reset Oz grid singleton too
+    import agent_grid.execution_grid.oz_grid as oz_mod
+
+    oz_mod._oz_grid = None
     # Also override mode so get_execution_grid returns our dry grid
     settings.deployment_mode = "coordinator"
 

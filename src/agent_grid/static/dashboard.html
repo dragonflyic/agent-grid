@@ -71,6 +71,9 @@ tr:hover td { background: rgba(88,166,255,0.04); }
 .stage-skipped { background: #30363d; color: var(--muted); }
 .stage-epic { background: #2d1f3d; color: var(--purple); }
 .stage-sub-issue { background: #1f3a5f; color: var(--accent); }
+.stage-waiting { background: #2a1f0b; color: var(--yellow); }
+.stage-proactive { background: #1a2b1a; color: var(--green); }
+.stage-labeled-other { background: #30363d; color: var(--muted); }
 
 /* Activity */
 .activity-list { max-height: 400px; overflow-y: auto; }
@@ -366,14 +369,14 @@ async function loadActivity() {
 
 function summarizeDetail(e) {
   const d = e.detail || {};
-  if (e.event_type === 'classified') return `${d.category} — ${d.reason || ''}`;
-  if (e.event_type === 'quality_gate') return `score=${d.score}/10, verdict=${d.verdict}`;
-  if (e.event_type === 'launched') return `mode=${d.mode}`;
-  if (e.event_type === 'launch_failed') return d.reason || '';
-  if (e.event_type === 'budget_blocked') return d.reason || '';
+  if (e.event_type === 'classified') return `${esc(d.category || '')} — ${esc(d.reason || '')}`;
+  if (e.event_type === 'quality_gate') return `score=${esc(String(d.score || ''))}/10, verdict=${esc(d.verdict || '')}`;
+  if (e.event_type === 'launched') return `mode=${esc(d.mode || '')}`;
+  if (e.event_type === 'launch_failed') return esc(d.reason || '');
+  if (e.event_type === 'budget_blocked') return esc(d.reason || '');
   if (e.event_type === 'manual_activate') return 'Added ag/todo';
-  if (e.event_type === 'manual_classify') return `${d.category} — ${d.reason || ''}`;
-  return JSON.stringify(d).slice(0, 100);
+  if (e.event_type === 'manual_classify') return `${esc(d.category || '')} — ${esc(d.reason || '')}`;
+  return esc(JSON.stringify(d).slice(0, 100));
 }
 
 async function showDetail(issueNumber) {

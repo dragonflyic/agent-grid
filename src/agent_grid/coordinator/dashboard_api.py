@@ -164,7 +164,7 @@ async def get_issue_detail(issue_number: int, repo: str | None = None) -> dict:
             "created_at": gh_issue.created_at.isoformat() if gh_issue.created_at else None,
         }
     except Exception:
-        pass
+        logger.warning(f"Failed to fetch GitHub info for issue #{issue_number}")
 
     return {
         "issue_number": issue_number,
@@ -345,6 +345,9 @@ async def trigger_scan(repo: str | None = None) -> dict:
     from .management_loop import get_management_loop
 
     actual_repo = repo or settings.target_repo
+    if not actual_repo:
+        raise HTTPException(status_code=400, detail="No target_repo configured")
+
     loop = get_management_loop()
     asyncio.create_task(loop.run_cycle())
     return {"status": "scan_triggered", "repo": actual_repo}

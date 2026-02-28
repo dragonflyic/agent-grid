@@ -67,7 +67,7 @@ class GitHubClient(IssueTracker):
             if response.status_code == 200:
                 parent_data = response.json()
                 return str(parent_data["number"])
-        except httpx.HTTPStatusError:
+        except Exception:
             pass
         return None
 
@@ -306,33 +306,6 @@ class GitHubClient(IssueTracker):
         """Update the status of an issue."""
         await self.update_issue(repo, issue_id, status=status)
 
-    async def get_blocked_issues(self, repo: str, issue_id: str) -> list[IssueInfo]:
-        """Get issues that are blocked by the given issue."""
-        # We need to search all open issues and check their blocked_by field
-        all_issues = await self.list_issues(repo, status=IssueStatus.OPEN)
-        blocked = []
-
-        for issue in all_issues:
-            if issue_id in issue.blocked_by:
-                blocked.append(issue)
-
-        return blocked
-
-    async def is_blocked(self, repo: str, issue_id: str) -> bool:
-        """Check if an issue is blocked by any open issues."""
-        issue = await self.get_issue(repo, issue_id)
-
-        for blocker_id in issue.blocked_by:
-            try:
-                blocker = await self.get_issue(repo, blocker_id)
-                if blocker.status != IssueStatus.CLOSED:
-                    return True
-            except httpx.HTTPStatusError:
-                # Blocker doesn't exist, ignore
-                continue
-
-        return False
-
     async def get_actions_job_logs(self, repo: str, job_id: int) -> str:
         """Download logs for a GitHub Actions job.
 
@@ -364,7 +337,7 @@ class GitHubClient(IssueTracker):
                 f"/repos/{repo}/issues/{issue_id}/assignees",
                 json={"assignees": [assignee]},
             )
-        except httpx.HTTPStatusError as e:
+        except Exception as e:
             logger.warning(f"Failed to assign issue #{issue_id} to {assignee}: {e}")
 
     async def request_pr_reviewers(self, repo: str, pr_number: int, reviewers: list[str]) -> None:
@@ -376,7 +349,7 @@ class GitHubClient(IssueTracker):
                 f"/repos/{repo}/pulls/{pr_number}/requested_reviewers",
                 json={"reviewers": reviewers},
             )
-        except httpx.HTTPStatusError as e:
+        except Exception as e:
             logger.warning(f"Failed to request reviewers on PR #{pr_number}: {e}")
 
     async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
@@ -386,7 +359,7 @@ class GitHubClient(IssueTracker):
                 f"/repos/{repo}/issues/{pr_number}/comments",
                 json={"body": body},
             )
-        except httpx.HTTPStatusError as e:
+        except Exception as e:
             logger.warning(f"Failed to comment on PR #{pr_number}: {e}")
 
     async def get_check_runs_for_ref(
@@ -423,7 +396,7 @@ class GitHubClient(IssueTracker):
                 f"/repos/{repo}/issues/{issue_id}/labels",
                 json={"labels": [label]},
             )
-        except httpx.HTTPStatusError:
+        except Exception:
             pass  # Label may already exist or not be valid
 
     async def _remove_label(self, repo: str, issue_id: str, label: str) -> None:
@@ -432,7 +405,7 @@ class GitHubClient(IssueTracker):
             await self._client.delete(
                 f"/repos/{repo}/issues/{issue_id}/labels/{label}",
             )
-        except httpx.HTTPStatusError:
+        except Exception:
             pass  # Label may not exist
 
     def _build_body(
