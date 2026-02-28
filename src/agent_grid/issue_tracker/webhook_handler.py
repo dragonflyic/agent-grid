@@ -156,6 +156,19 @@ async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
         )
         return
 
+    # Route PR comments to PR_COMMENT so scheduler can launch agents on agent branches
+    if is_pull_request:
+        await event_bus.publish(
+            EventType.PR_COMMENT,
+            {
+                "repo": repo_full_name,
+                "pr_number": issue_number,
+                "comment_body": comment_body,
+                "comment_author": comment.get("user", {}).get("login", ""),
+            },
+        )
+        return
+
     # Publish comment event for ag/* issues so scheduler can react
     has_ag_label = any(label.startswith("ag/") for label in labels)
     if has_ag_label:
@@ -166,7 +179,7 @@ async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
                 "issue_id": str(issue_number),
                 "comment_body": comment_body,
                 "labels": labels,
-                "is_pull_request": is_pull_request,
+                "is_pull_request": False,
                 "comment_author": comment.get("user", {}).get("login", ""),
             },
         )

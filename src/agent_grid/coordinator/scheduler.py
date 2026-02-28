@@ -5,6 +5,7 @@ pipeline. The scheduler focuses on real-time event-driven reactions:
 - Webhook-triggered issue creation → classify + launch immediately
 - Issue comments on ag/* issues → unblock or trigger re-work
 - PR review comments → launch address_review agent
+- PR comments (regular) → launch address_review agent on agent branches
 - PR closed → launch retry agent
 - Nudge requests → immediate agent launch
 - Agent completion → save checkpoint, update labels
@@ -83,6 +84,8 @@ class Scheduler:
                 await self._handle_agent_failed(event)
             elif event.type == EventType.PR_REVIEW:
                 await self._handle_pr_review(event)
+            elif event.type == EventType.PR_COMMENT:
+                await self._handle_pr_comment(event)
             elif event.type == EventType.PR_CLOSED:
                 await self._handle_pr_closed(event)
             elif event.type == EventType.CHECK_RUN_FAILED:
@@ -225,6 +228,54 @@ class Scheduler:
                 loop = get_management_loop()
                 await loop._launch_review_handler(repo, pr_info)
                 break
+
+    async def _handle_pr_comment(self, event: Event) -> None:
+        """Handle regular PR comment — launch address_review if on an agent branch."""
+        payload = event.payload
+        repo = payload.get("repo")
+        pr_number = payload.get("pr_number")
+        comment_body = payload.get("comment_body", "")
+
+        if not repo or not pr_number:
+            return
+
+        # Fetch the PR to get the branch name
+        tracker = get_issue_tracker()
+        from ..issue_tracker.github_client import GitHubClient
+
+        if not isinstance(tracker, GitHubClient):
+            return
+
+        try:
+            resp = await tracker._client.get(f"/repos/{repo}/pulls/{pr_number}")
+            resp.raise_for_status()
+            pr_data = resp.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch PR #{pr_number}: {e}")
+            return
+
+        head_branch = pr_data.get("head", {}).get("ref", "")
+        if not head_branch.startswith("agent/"):
+            return
+
+        match = re.match(r"agent/(\d+)(?:-|$)", head_branch)
+        if not match:
+            return
+        issue_id = match.group(1)
+
+        # Build pr_info and launch via the review handler
+        pr_info = {
+            "pr_number": pr_number,
+            "issue_id": issue_id,
+            "branch": head_branch,
+            "review_comments": comment_body,
+        }
+
+        from .management_loop import get_management_loop
+
+        loop = get_management_loop()
+        await loop._launch_review_handler(repo, pr_info)
+        logger.info(f"PR #{pr_number}: launched agent from PR comment")
 
     async def _handle_pr_closed(self, event: Event) -> None:
         """Handle PR closed — transition to ag/done if merged, retry if not."""
