@@ -72,6 +72,12 @@ Follow any auto-triggered skills (user-invocable: false) — they define the rep
 
     if mode == "plan":
         parent_author_line = f"\n- Parent issue author: @{issue.author}" if issue.author else ""
+        assign_step = (
+            f'\n**Step C** — Assign the sub-issue to the parent issue author:\n'
+            f'```bash\n'
+            f'gh issue edit $NEW_ISSUE --repo {repo} --add-assignee {issue.author}\n'
+            f'```\n'
+        ) if issue.author else ""
 
         return f"""You are a senior tech lead planning work decomposition for a complex GitHub issue.
 
@@ -124,10 +130,7 @@ GitHub's UI and the dependency resolver only recognise sub-issues that are
 linked via the sub-issues API, so step B is required. Without it the sub-issue
 will not appear under the parent and the system cannot track completion.
 
-**Step C** — Assign the sub-issue to the parent issue author:
-```bash
-gh issue edit $NEW_ISSUE --repo {repo} --add-assignee {issue.author or "<parent-author>"}
-```
+{assign_step}
 
 **Each sub-issue body MUST include all of the following:**
 
@@ -305,7 +308,7 @@ gh pr create --title "..." --body "Closes #{issue.number}{owner_tag}\\n\\n..."
         prompt = (
             base
             + f"""
-## IMPORTANT: CI check "{check_name}" failed on your PR #{pr_number}
+## IMPORTANT: CI check "{check_name}" failed on {f"PR #{pr_number}" if pr_number else f"branch {existing_branch}"}
 
 Previous work is on branch: {existing_branch}
 Checkout that branch (don't create a new one):
@@ -333,7 +336,7 @@ Output:
 git push origin {existing_branch}
 ```
 
-Do NOT create a new PR. Your commits will be added to the existing PR #{pr_number}.
+Do NOT create a new PR. Your commits will be added to the existing {f"PR #{pr_number}" if pr_number else "pull request"}.
 Do NOT force push or squash.
 
 **EXIT immediately after pushing.** Your job is done. CI will re-run automatically.
