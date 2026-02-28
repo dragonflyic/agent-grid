@@ -43,7 +43,8 @@ a:hover { text-decoration: underline; }
 /* Funnel */
 .funnel { display: flex; gap: 8px; flex-wrap: wrap; }
 .funnel-item { flex: 1; min-width: 100px; text-align: center; padding: 12px 8px;
-  border-radius: 6px; background: var(--bg); }
+  border-radius: 6px; background: var(--bg); cursor: pointer; transition: opacity 0.15s; }
+.funnel-item:hover { opacity: 0.8; }
 .funnel-item .num { font-size: 24px; font-weight: 700; }
 .funnel-item .label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
 .funnel-item.highlight { border: 1px solid var(--accent); }
@@ -246,11 +247,12 @@ tr:hover .row-actions { opacity: 1; }
             <th class="sortable" onclick="sortBy('classification')">Classification <span class="sort-arrow" id="sort-classification"></span></th>
             <th class="sortable" onclick="sortBy('confidence_score')">Confidence <span class="sort-arrow" id="sort-confidence_score"></span></th>
             <th class="sortable" onclick="sortBy('retry_count')">Retries <span class="sort-arrow" id="sort-retry_count"></span></th>
+            <th class="sortable" onclick="sortBy('created_at')">Age <span class="sort-arrow" id="sort-created_at"></span></th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody id="issues-body">
-          <tr><td colspan="8" class="loading">Loading...</td></tr>
+          <tr><td colspan="9" class="loading">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -300,6 +302,7 @@ let issuesTotal = 0;
 let issuesPage = 0;
 const PAGE_SIZE = 50;
 let issuesLoading = false;
+let currentRepo = '';
 
 async function fetchJSON(url) {
   const resp = await fetch(url);
@@ -423,7 +426,8 @@ function updateDurations() {
 async function loadOverview() {
   try {
     const data = await fetchJSON(`${API}/overview`);
-    document.getElementById('repo-name').textContent = data.repo || '\u2014';
+    currentRepo = data.repo || '';
+    document.getElementById('repo-name').textContent = currentRepo || '\u2014';
 
     // Funnel
     const labels = data.issues_by_label || {};
@@ -437,15 +441,15 @@ async function loadOverview() {
     const pending = ec.pending || 0;
 
     document.getElementById('funnel').innerHTML = [
-      { num: data.total_open_issues, label: 'Total Open' },
-      { num: data.unlabeled_issues, label: 'Unlabeled' },
-      { num: data.labeled_issues, label: 'Labeled' },
-      { num: inProgress, label: 'In Progress' },
-      { num: running + pending, label: 'Executing' },
-      { num: review, label: 'In Review' },
-      { num: blocked, label: 'Blocked' },
-      { num: failed, label: 'Failed' },
-    ].map(i => `<div class="funnel-item${i.num > 0 ? ' highlight' : ''}">
+      { num: data.total_open_issues, label: 'Total Open', stage: '' },
+      { num: data.unlabeled_issues, label: 'Unlabeled', stage: 'unlabeled' },
+      { num: data.labeled_issues, label: 'Labeled', stage: '' },
+      { num: inProgress, label: 'In Progress', stage: 'in-progress' },
+      { num: running + pending, label: 'Executing', stage: '' },
+      { num: review, label: 'In Review', stage: 'review-pending' },
+      { num: blocked, label: 'Blocked', stage: 'blocked' },
+      { num: failed, label: 'Failed', stage: 'failed' },
+    ].map(i => `<div class="funnel-item${i.num > 0 ? ' highlight' : ''}" onclick="filterByStage('${i.stage}')" title="${i.stage ? 'Filter issues by ' + i.label : 'Show all issues'}">
       <div class="num">${i.num}</div><div class="label">${i.label}</div></div>`).join('');
 
     // Budget
@@ -488,7 +492,7 @@ async function loadIssues(page) {
   issuesLoading = true;
 
   const tbody = document.getElementById('issues-body');
-  tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" class="loading">Loading...</td></tr>';
 
   const stage = document.getElementById('stage-filter').value;
   const classVal = document.getElementById('class-filter').value;
@@ -506,7 +510,7 @@ async function loadIssues(page) {
     updateActivateBtn();
     renderIssues();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="8" class="error">${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="error">${esc(e.message)}</td></tr>`;
   } finally {
     issuesLoading = false;
   }
@@ -534,20 +538,24 @@ function renderIssues() {
 
   const tbody = document.getElementById('issues-body');
   if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="loading">No issues found</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="loading">No issues found</td></tr>';
     document.getElementById('issues-pagination').innerHTML = '';
     return;
   }
 
+  const ghBase = currentRepo ? `https://github.com/${currentRepo}/issues/` : '';
   tbody.innerHTML = sorted.map(i => `
     <tr>
       <td><input type="checkbox" data-num="${i.issue_number}" onchange="toggleSelect(${i.issue_number}, this.checked)"${selectedIssues.has(i.issue_number) ? ' checked' : ''}></td>
-      <td><a href="#" onclick="showDetail(${i.issue_number}); return false;">#${i.issue_number}</a></td>
+      <td style="white-space:nowrap">
+        <a href="#" onclick="showDetail(${i.issue_number}); return false;" title="View details">#${i.issue_number}</a>${ghBase ? ` <a href="${ghBase}${i.issue_number}" target="_blank" title="Open in GitHub" style="color:var(--muted);font-size:11px">&#8599;</a>` : ''}
+      </td>
       <td>${esc(i.title || '')}</td>
       <td><span class="stage-badge stage-${i.pipeline_stage}">${esc(i.pipeline_stage)}</span></td>
       <td>${esc(i.classification || '\u2014')}</td>
       <td>${i.confidence_score != null ? i.confidence_score + '/10' : '\u2014'}</td>
       <td>${i.retry_count || 0}</td>
+      <td style="white-space:nowrap"><span title="${fmtTime(i.created_at)}">${fmtRelative(i.created_at)}</span></td>
       <td><span class="row-actions">
         <button class="btn-retry" onclick="event.stopPropagation();retryIssue(${i.issue_number})" title="Reset to ag/todo">Retry</button>
         <button class="btn-classify" onclick="event.stopPropagation();classifyIssue(${i.issue_number})" title="Run classifier">Classify</button>
@@ -594,6 +602,12 @@ function filterByClassification(cls) {
   document.getElementById('class-filter').value = cls;
   loadIssues(0);
   document.getElementById('class-filter').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function filterByStage(stage) {
+  document.getElementById('stage-filter').value = stage;
+  loadIssues(0);
+  document.getElementById('stage-filter').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function clearFilters() {
@@ -669,7 +683,7 @@ async function loadActivity() {
       <div class="event">
         <span class="event-time" title="${fmtTime(e.created_at)}">${fmtRelative(e.created_at)}</span>
         <span class="event-type">${esc(e.event_type)}</span>
-        <span style="min-width:50px">#${e.issue_number}</span>
+        <a href="#" onclick="showDetail(${e.issue_number}); return false;" style="min-width:50px">#${e.issue_number}</a>
         <span class="event-detail">${summarizeDetail(e)}</span>
       </div>`).join('');
   } catch (e) {
