@@ -122,21 +122,9 @@ class TestProjectManager:
             }
         }
         # Response 2: addProjectV2ItemById
-        add_response = {
-            "data": {
-                "addProjectV2ItemById": {
-                    "item": {"id": "PVTI_456"}
-                }
-            }
-        }
+        add_response = {"data": {"addProjectV2ItemById": {"item": {"id": "PVTI_456"}}}}
         # Response 3: updateProjectV2ItemFieldValue
-        update_response = {
-            "data": {
-                "updateProjectV2ItemFieldValue": {
-                    "projectV2Item": {"id": "PVTI_456"}
-                }
-            }
-        }
+        update_response = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_456"}}}}
 
         pm, http = _make_project_manager(
             responses=[init_response, add_response, update_response],

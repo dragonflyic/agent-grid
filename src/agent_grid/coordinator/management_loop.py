@@ -174,8 +174,7 @@ class ManagementLoop:
             ci_fix_count = ci_meta.get("ci_fix_count", 0)
             if ci_fix_count >= settings.max_ci_fix_retries:
                 logger.warning(
-                    f"Issue #{ci_issue_id}: CI fix retry limit "
-                    f"({settings.max_ci_fix_retries}) reached via polling"
+                    f"Issue #{ci_issue_id}: CI fix retry limit ({settings.max_ci_fix_retries}) reached via polling"
                 )
                 continue
 

@@ -73,11 +73,15 @@ Follow any auto-triggered skills (user-invocable: false) — they define the rep
     if mode == "plan":
         parent_author_line = f"\n- Parent issue author: @{issue.author}" if issue.author else ""
         assign_step = (
-            f'\n**Step C** — Assign the sub-issue to the parent issue author:\n'
-            f'```bash\n'
-            f'gh issue edit $NEW_ISSUE --repo {repo} --add-assignee {issue.author}\n'
-            f'```\n'
-        ) if issue.author else ""
+            (
+                f"\n**Step C** — Assign the sub-issue to the parent issue author:\n"
+                f"```bash\n"
+                f"gh issue edit $NEW_ISSUE --repo {repo} --add-assignee {issue.author}\n"
+                f"```\n"
+            )
+            if issue.author
+            else ""
+        )
 
         return f"""You are a senior tech lead planning work decomposition for a complex GitHub issue.
 

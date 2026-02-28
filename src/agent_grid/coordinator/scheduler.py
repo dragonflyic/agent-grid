@@ -254,6 +254,7 @@ class Scheduler:
             # Mirror label onto PR
             tracker = get_issue_tracker()
             from ..issue_tracker.github_client import GitHubClient
+
             if isinstance(tracker, GitHubClient):
                 await tracker._add_label(repo, str(pr_number), "ag/done")
             await tracker.update_issue_status(repo, issue_id, IssueStatus.CLOSED)
@@ -514,6 +515,7 @@ class Scheduler:
                             if pr_number:
                                 tracker = get_issue_tracker()
                                 from ..issue_tracker.github_client import GitHubClient
+
                                 if isinstance(tracker, GitHubClient):
                                     await tracker._add_label(repo, str(pr_number), "ag/review-pending")
                             await self._assign_and_tag_owner(repo, issue_id, pr_number)

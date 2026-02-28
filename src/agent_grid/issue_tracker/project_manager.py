@@ -76,7 +76,8 @@ class ProjectManager:
 
         # Try org project first, then user project
         for owner_type in ("organization", "user"):
-            query = """
+            query = (
+                """
             query($owner: String!, $number: Int!) {
               %s(login: $owner) {
                 projectV2(number: $number) {
@@ -96,7 +97,9 @@ class ProjectManager:
                 }
               }
             }
-            """ % owner_type
+            """
+                % owner_type
+            )
 
             data = await self._graphql(query, {"owner": owner, "number": number})
             if not data:
@@ -112,9 +115,7 @@ class ProjectManager:
             for field in project_data.get("fields", {}).get("nodes", []):
                 if field.get("name") == "Status":
                     self._status_field_id = field["id"]
-                    self._status_options = {
-                        opt["name"]: opt["id"] for opt in field.get("options", [])
-                    }
+                    self._status_options = {opt["name"]: opt["id"] for opt in field.get("options", [])}
                     break
 
             if self._project_id:

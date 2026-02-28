@@ -77,16 +77,18 @@ class CIMonitor:
                 if cr.get("conclusion") not in ("failure", "timed_out"):
                     continue
 
-                failures.append({
-                    "repo": repo,
-                    "branch": head_branch,
-                    "head_sha": head_sha,
-                    "pr_number": pr_number,
-                    "check_name": cr.get("name", ""),
-                    "check_output": "",  # will be fetched via job logs
-                    "check_url": cr.get("html_url", ""),
-                    "job_id": cr.get("id"),
-                })
+                failures.append(
+                    {
+                        "repo": repo,
+                        "branch": head_branch,
+                        "head_sha": head_sha,
+                        "pr_number": pr_number,
+                        "check_name": cr.get("name", ""),
+                        "check_output": "",  # will be fetched via job logs
+                        "check_url": cr.get("html_url", ""),
+                        "job_id": cr.get("id"),
+                    }
+                )
                 break  # One failure per PR is enough to trigger a fix agent
 
         # Update cursor

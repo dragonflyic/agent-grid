@@ -388,21 +388,27 @@ class TestPlanModePrompt:
         assert "sub_issues" not in implement
 
         review = build_prompt(
-            issue, "owner/repo", mode="address_review",
+            issue,
+            "owner/repo",
+            mode="address_review",
             context={"pr_number": 5, "review_comments": "fix typo"},
         )
         assert "addressing review feedback" in review.lower()
         assert "sub_issues" not in review
 
         fix_ci = build_prompt(
-            issue, "owner/repo", mode="fix_ci",
+            issue,
+            "owner/repo",
+            mode="fix_ci",
             context={"pr_number": 5, "check_name": "tests", "check_output": "fail"},
         )
         assert "CI check" in fix_ci
         assert "sub_issues" not in fix_ci
 
         retry = build_prompt(
-            issue, "owner/repo", mode="retry_with_feedback",
+            issue,
+            "owner/repo",
+            mode="retry_with_feedback",
             context={"closed_pr_number": 3, "human_feedback": "wrong approach"},
         )
         assert "previous attempt" in retry.lower()
@@ -452,7 +458,8 @@ class TestPRCreationPrompt:
         from agent_grid.coordinator.prompt_builder import build_prompt
 
         prompt = build_prompt(
-            self._make_issue(author="bob"), "owner/repo",
+            self._make_issue(author="bob"),
+            "owner/repo",
             mode="retry_with_feedback",
             context={"closed_pr_number": 3, "human_feedback": "wrong"},
         )
@@ -463,7 +470,8 @@ class TestPRCreationPrompt:
         from agent_grid.coordinator.prompt_builder import build_prompt
 
         prompt = build_prompt(
-            self._make_issue(), "owner/repo",
+            self._make_issue(),
+            "owner/repo",
             mode="retry_with_feedback",
             context={"closed_pr_number": 3, "human_feedback": "wrong"},
         )
@@ -523,6 +531,7 @@ class TestPlannerBlockedBy:
 
         # Simulate what happens after LLM returns a plan
         import json
+
         plan = {
             "plan_summary": "Test plan",
             "sub_tasks": [
@@ -548,6 +557,7 @@ class TestPlannerBlockedBy:
         class FakeResponse:
             class Content:
                 text = json.dumps(plan)
+
             content = [Content()]
 
         class FakeClient:
@@ -559,6 +569,7 @@ class TestPlannerBlockedBy:
         planner._client = FakeClient()
 
         from unittest.mock import patch
+
         with patch("agent_grid.coordinator.planner.embed_metadata", side_effect=lambda text, meta: text):
             result = await planner.decompose("owner/repo", 1, "Parent", "Body")
 

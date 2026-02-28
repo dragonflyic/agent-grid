@@ -100,9 +100,12 @@ class TestCIMonitor:
     @pytest.mark.asyncio
     async def test_skips_non_agent_branches(self):
         prs = [_make_pr(1, "feature/foo", "sha1")]
-        monitor = _make_monitor(prs=prs, check_runs_by_sha={
-            "sha1": [{"conclusion": "failure", "name": "test", "id": 1, "html_url": ""}],
-        })
+        monitor = _make_monitor(
+            prs=prs,
+            check_runs_by_sha={
+                "sha1": [{"conclusion": "failure", "name": "test", "id": 1, "html_url": ""}],
+            },
+        )
         failures = await monitor.check_ci_failures("owner/repo")
         assert failures == []
 
