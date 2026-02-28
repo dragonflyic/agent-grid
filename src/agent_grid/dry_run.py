@@ -451,6 +451,13 @@ class DryRunDatabase:
             )
         return results[offset : offset + limit]
 
+    async def get_execution_counts_by_issue(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for entry in self._executions.values():
+            iid = entry["issue_id"]
+            counts[iid] = counts.get(iid, 0) + 1
+        return counts
+
     async def set_session_link(self, execution_id: UUID, session_link: str) -> None:
         pass
 

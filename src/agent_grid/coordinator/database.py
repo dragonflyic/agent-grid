@@ -699,6 +699,13 @@ class Database:
                 for m in result.scalars().all()
             ]
 
+    async def get_execution_counts_by_issue(self) -> dict[str, int]:
+        """Return {issue_id: execution_count} for all issues."""
+        async with self._session() as session:
+            stmt = select(ExecutionModel.issue_id, func.count()).group_by(ExecutionModel.issue_id)
+            result = await session.execute(stmt)
+            return {row[0]: row[1] for row in result.all()}
+
     async def set_session_link(self, execution_id: UUID, session_link: str) -> None:
         """Store the Oz session link for an execution."""
         async with self._session() as session:

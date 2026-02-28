@@ -39,6 +39,8 @@ a:hover { text-decoration: underline; }
 
 .full-width { grid-column: 1 / -1; }
 .class-item:hover { color: var(--accent); }
+.class-item.active { color: var(--accent); font-weight: 600; background: rgba(88,166,255,0.08);
+  border-radius: 4px; padding-left: 4px; margin-left: -4px; }
 
 /* Funnel */
 .funnel { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -124,6 +126,15 @@ tr:hover .row-actions { opacity: 1; }
 .row-actions .btn-classify { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
 .row-actions .btn-retry:hover { background: var(--yellow); color: var(--bg); }
 .row-actions .btn-classify:hover { background: var(--accent); color: var(--bg); }
+.row-actions button:disabled { opacity: 0.5; cursor: wait; }
+
+/* Onboarding empty state */
+.empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+.empty-state h3 { color: var(--text); margin-bottom: 8px; font-size: 16px; }
+.empty-state p { margin: 4px 0; font-size: 13px; }
+.empty-state .step { display: inline-block; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 16px; margin: 8px; text-align: left; min-width: 180px; }
+.empty-state .step-num { font-weight: 700; color: var(--accent); }
 
 /* Activity */
 .activity-list { max-height: 400px; overflow-y: auto; }
@@ -234,6 +245,8 @@ tr:hover .row-actions { opacity: 1; }
       <button class="secondary" onclick="clearFilters()">Clear</button>
       <button id="activate-btn" onclick="activateSelected()" disabled
         title="Add ag/todo label to enter issues into the automated pipeline">Add to Pipeline</button>
+      <button id="classify-btn" onclick="classifySelected()" disabled
+        title="Run classifier on selected issues">Classify Selected</button>
       <button onclick="triggerScan()">Trigger Scan</button>
     </div>
     <div style="overflow-x: auto;">
@@ -247,12 +260,13 @@ tr:hover .row-actions { opacity: 1; }
             <th class="sortable" onclick="sortBy('classification')">Classification <span class="sort-arrow" id="sort-classification"></span></th>
             <th class="sortable" onclick="sortBy('confidence_score')">Confidence <span class="sort-arrow" id="sort-confidence_score"></span></th>
             <th class="sortable" onclick="sortBy('retry_count')">Retries <span class="sort-arrow" id="sort-retry_count"></span></th>
+            <th class="sortable" onclick="sortBy('execution_count')">Execs <span class="sort-arrow" id="sort-execution_count"></span></th>
             <th class="sortable" onclick="sortBy('created_at')">Age <span class="sort-arrow" id="sort-created_at"></span></th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody id="issues-body">
-          <tr><td colspan="9" class="loading">Loading...</td></tr>
+          <tr><td colspan="10" class="loading">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -464,9 +478,7 @@ async function loadOverview() {
     const cl = data.classifications || {};
     classificationKeys = Object.keys(cl);
     populateClassFilter();
-    document.getElementById('class-content').innerHTML = Object.entries(cl).length
-      ? Object.entries(cl).map(([k, v]) => `<div class="class-item" style="cursor:pointer;padding:2px 0" onclick="filterByClassification('${esc(k)}')">${esc(k)}: <strong>${v}</strong></div>`).join('')
-      : '<div class="loading">No classified issues yet</div>';
+    renderClassifications(cl);
   } catch (e) {
     document.getElementById('funnel').innerHTML = `<div class="error">${esc(e.message)}</div>`;
   }
@@ -492,7 +504,7 @@ async function loadIssues(page) {
   issuesLoading = true;
 
   const tbody = document.getElementById('issues-body');
-  tbody.innerHTML = '<tr><td colspan="9" class="loading">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" class="loading">Loading...</td></tr>';
 
   const stage = document.getElementById('stage-filter').value;
   const classVal = document.getElementById('class-filter').value;
@@ -510,7 +522,7 @@ async function loadIssues(page) {
     updateActivateBtn();
     renderIssues();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="9" class="error">${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="error">${esc(e.message)}</td></tr>`;
   } finally {
     issuesLoading = false;
   }
@@ -538,7 +550,24 @@ function renderIssues() {
 
   const tbody = document.getElementById('issues-body');
   if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="loading">No issues found</td></tr>';
+    const hasFilters = document.getElementById('stage-filter').value ||
+      document.getElementById('class-filter').value ||
+      document.getElementById('search-input').value.trim();
+    if (hasFilters) {
+      tbody.innerHTML = '<tr><td colspan="10" class="loading">No issues match the current filters</td></tr>';
+    } else {
+      tbody.innerHTML = `<tr><td colspan="10">
+        <div class="empty-state">
+          <h3>No issues in the pipeline yet</h3>
+          <p>Get started by adding GitHub issues to the automated pipeline:</p>
+          <div style="margin-top:12px">
+            <div class="step"><span class="step-num">1.</span> Select issues using checkboxes</div>
+            <div class="step"><span class="step-num">2.</span> Click "Add to Pipeline"</div>
+            <div class="step"><span class="step-num">3.</span> Or click "Trigger Scan" to auto-detect</div>
+          </div>
+        </div>
+      </td></tr>`;
+    }
     document.getElementById('issues-pagination').innerHTML = '';
     return;
   }
@@ -555,10 +584,11 @@ function renderIssues() {
       <td>${esc(i.classification || '\u2014')}</td>
       <td>${i.confidence_score != null ? i.confidence_score + '/10' : '\u2014'}</td>
       <td>${i.retry_count || 0}</td>
+      <td>${i.execution_count || 0}</td>
       <td style="white-space:nowrap"><span title="${fmtTime(i.created_at)}">${fmtRelative(i.created_at)}</span></td>
       <td><span class="row-actions">
-        <button class="btn-retry" onclick="event.stopPropagation();retryIssue(${i.issue_number})" title="Reset to ag/todo">Retry</button>
-        <button class="btn-classify" onclick="event.stopPropagation();classifyIssue(${i.issue_number})" title="Run classifier">Classify</button>
+        <button class="btn-retry" onclick="event.stopPropagation();rowRetry(this,${i.issue_number})" title="Reset to ag/todo">Retry</button>
+        <button class="btn-classify" onclick="event.stopPropagation();rowClassify(this,${i.issue_number})" title="Run classifier">Classify</button>
       </span></td>
     </tr>`).join('');
 
@@ -598,14 +628,34 @@ function debouncedRenderIssues() {
   debounceTimer = setTimeout(() => loadIssues(0), 300);
 }
 
+let lastClassifications = {};
+
+function renderClassifications(cl) {
+  if (cl !== undefined) lastClassifications = cl;
+  const activeClass = document.getElementById('class-filter').value;
+  const el = document.getElementById('class-content');
+  const entries = Object.entries(lastClassifications);
+  if (!entries.length) {
+    el.innerHTML = '<div class="loading">No classified issues yet</div>';
+    return;
+  }
+  el.innerHTML = entries.map(([k, v]) => {
+    const isActive = activeClass === k;
+    return `<div class="class-item${isActive ? ' active' : ''}" style="cursor:pointer;padding:2px 0" onclick="filterByClassification('${esc(k)}')">${esc(k)}: <strong>${v}</strong></div>`;
+  }).join('');
+}
+
 function filterByClassification(cls) {
-  document.getElementById('class-filter').value = cls;
+  const current = document.getElementById('class-filter').value;
+  document.getElementById('class-filter').value = current === cls ? '' : cls;
+  renderClassifications();
   loadIssues(0);
   document.getElementById('class-filter').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function filterByStage(stage) {
-  document.getElementById('stage-filter').value = stage;
+  const current = document.getElementById('stage-filter').value;
+  document.getElementById('stage-filter').value = current === stage ? '' : stage;
   loadIssues(0);
   document.getElementById('stage-filter').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -616,6 +666,7 @@ function clearFilters() {
   document.getElementById('class-filter').value = '';
   sortColumn = 'issue_number';
   sortDirection = 'desc';
+  renderClassifications();
   loadIssues(0);
 }
 
@@ -636,10 +687,15 @@ function toggleSelectAll() {
 
 function updateActivateBtn() {
   const btn = document.getElementById('activate-btn');
+  const clsBtn = document.getElementById('classify-btn');
   btn.disabled = selectedIssues.size === 0;
+  clsBtn.disabled = selectedIssues.size === 0;
   btn.textContent = selectedIssues.size
     ? `Add ${selectedIssues.size} to Pipeline`
     : 'Add to Pipeline';
+  clsBtn.textContent = selectedIssues.size
+    ? `Classify ${selectedIssues.size}`
+    : 'Classify Selected';
 }
 
 async function activateSelected() {
@@ -656,6 +712,50 @@ async function activateSelected() {
     if (data.errors?.length) showToast(`${data.errors.length} failed`, 'error');
     refresh();
   } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
+}
+
+async function classifySelected() {
+  if (!selectedIssues.size) return;
+  const btn = document.getElementById('classify-btn');
+  btn.disabled = true; btn.textContent = 'Classifying...';
+  try {
+    const resp = await fetch(`${API}/actions/classify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue_numbers: [...selectedIssues] }),
+    });
+    const data = await resp.json();
+    const ok = data.results?.filter(r => !r.error).length || 0;
+    const fail = data.results?.filter(r => r.error).length || 0;
+    showToast(`Classified ${ok} issue${ok !== 1 ? 's' : ''}${fail ? `, ${fail} failed` : ''}`, ok ? 'success' : 'error');
+    refresh();
+  } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
+  finally { updateActivateBtn(); }
+}
+
+async function rowRetry(btn, num) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    await fetch(`${API}/actions/retry/${num}`, { method: 'POST' });
+    showToast(`Issue #${num} reset to ag/todo`, 'success');
+    refresh();
+  } catch (e) { showToast(`Error: ${e.message}`, 'error'); btn.disabled = false; btn.textContent = 'Retry'; }
+}
+
+async function rowClassify(btn, num) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const resp = await fetch(`${API}/actions/classify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue_numbers: [num] }),
+    });
+    const data = await resp.json();
+    const r = data.results?.[0];
+    if (r?.error) showToast(`Error: ${r.error}`, 'error');
+    else showToast(`#${num} classified as ${r?.classification}`, 'success');
+    refresh();
+  } catch (e) { showToast(`Error: ${e.message}`, 'error'); btn.disabled = false; btn.textContent = 'Classify'; }
 }
 
 async function triggerScan() {

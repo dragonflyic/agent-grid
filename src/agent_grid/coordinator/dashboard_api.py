@@ -99,6 +99,7 @@ async def list_issues(
     all_open = await tracker.list_issues(actual_repo, status=IssueStatus.OPEN)
     all_states = await db.list_all_issue_states(actual_repo, limit=9999)
     state_map = {s["issue_number"]: s for s in all_states}
+    exec_counts = await db.get_execution_counts_by_issue()
 
     results = []
     for issue in all_open:
@@ -133,6 +134,7 @@ async def list_issues(
                 "confidence_verdict": metadata.get("confidence_verdict"),
                 "retry_count": state.get("retry_count", 0),
                 "last_checked_at": state.get("last_checked_at"),
+                "execution_count": exec_counts.get(str(issue.number), 0),
                 "created_at": issue.created_at.isoformat() if issue.created_at else None,
             }
         )
