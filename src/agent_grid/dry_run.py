@@ -406,14 +406,13 @@ def install_dry_run_wrappers() -> None:
     # so they pick up the dry-run wrappers when re-initialized
     import agent_grid.coordinator.blocker_resolver as blocker_mod
     import agent_grid.coordinator.budget_manager as budget_mod
+    import agent_grid.coordinator.ci_monitor as ci_monitor_mod
     import agent_grid.coordinator.dependency_resolver as dep_mod
     import agent_grid.coordinator.planner as planner_mod
     import agent_grid.coordinator.pr_monitor as pr_monitor_mod
     import agent_grid.coordinator.proactive_scanner as proactive_scanner_mod
     import agent_grid.coordinator.quality_gate as quality_gate_mod
     import agent_grid.coordinator.scanner as scanner_mod
-
-    import agent_grid.coordinator.ci_monitor as ci_monitor_mod
     import agent_grid.issue_tracker.project_manager as project_mod
 
     ci_monitor_mod._ci_monitor = None

@@ -336,7 +336,7 @@ Output:
 git push origin {existing_branch}
 ```
 
-Do NOT create a new PR. Your commits will be added to the existing {f"PR #{pr_number}" if pr_number else "pull request"}.
+Do NOT create a new PR. Commits go to the existing {f"PR #{pr_number}" if pr_number else "pull request"}.
 Do NOT force push or squash.
 
 **EXIT immediately after pushing.** Your job is done. CI will re-run automatically.
