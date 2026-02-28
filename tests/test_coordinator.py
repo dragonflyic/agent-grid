@@ -407,3 +407,170 @@ class TestPlanModePrompt:
         )
         assert "previous attempt" in retry.lower()
         assert "sub_issues" not in retry
+
+
+class TestPRCreationPrompt:
+    """Tests for PR creation prompt using proper GitHub fields."""
+
+    def _make_issue(self, author=""):
+        from agent_grid.issue_tracker.public_api import IssueInfo
+
+        return IssueInfo(
+            id="42",
+            number=42,
+            title="Fix bug",
+            body="The app crashes",
+            labels=[],
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/42",
+            author=author,
+        )
+
+    def test_implement_prompt_includes_reviewer_flag(self):
+        """gh pr create should include --reviewer when author is present."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author="alice"), "owner/repo", mode="implement")
+        assert "--reviewer alice" in prompt
+
+    def test_implement_prompt_no_reviewer_when_no_author(self):
+        """gh pr create should omit --reviewer when author is empty."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author=""), "owner/repo", mode="implement")
+        assert "--reviewer" not in prompt
+
+    def test_implement_prompt_includes_label_flag(self):
+        """gh pr create should include --label for status tracking."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="implement")
+        assert '--label "ag/in-progress"' in prompt
+
+    def test_retry_prompt_includes_reviewer_flag(self):
+        """Retry mode gh pr create should also include --reviewer."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(
+            self._make_issue(author="bob"), "owner/repo",
+            mode="retry_with_feedback",
+            context={"closed_pr_number": 3, "human_feedback": "wrong"},
+        )
+        assert "--reviewer bob" in prompt
+
+    def test_retry_prompt_includes_label_flag(self):
+        """Retry mode gh pr create should include --label."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(
+            self._make_issue(), "owner/repo",
+            mode="retry_with_feedback",
+            context={"closed_pr_number": 3, "human_feedback": "wrong"},
+        )
+        assert '--label "ag/in-progress"' in prompt
+
+    def test_no_cc_author_in_body(self):
+        """PR body should not contain 'cc @author' — use --reviewer instead."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author="alice"), "owner/repo", mode="implement")
+        assert "cc @alice" not in prompt
+
+
+class TestPlannerBlockedBy:
+    """Tests for planner auto-adding Blocked by: to sub-issue body."""
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_added_from_depends_on(self):
+        """Sub-issues with depends_on should have Blocked by: in body."""
+        from agent_grid.coordinator.planner import Planner
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        # Build a fake planner that doesn't call the LLM
+        planner = Planner.__new__(Planner)
+
+        created = []
+        assign_calls = []
+
+        class FakeTracker:
+            async def create_subissue(self, repo, parent_id, title, body, labels=None):
+                issue = IssueInfo(
+                    id=str(100 + len(created)),
+                    number=100 + len(created),
+                    title=title,
+                    body=body,
+                    status=IssueStatus.OPEN,
+                    labels=labels or [],
+                    repo_url=f"https://github.com/{repo}",
+                    html_url=f"https://github.com/{repo}/issues/{100 + len(created)}",
+                )
+                created.append({"issue": issue, "body": body, "labels": labels})
+                return issue
+
+            async def add_comment(self, repo, issue_id, body):
+                pass
+
+            async def assign_issue(self, repo, issue_id, assignee):
+                assign_calls.append((issue_id, assignee))
+
+        class FakeLabels:
+            async def transition_to(self, repo, issue_id, label):
+                pass
+
+        planner._tracker = FakeTracker()
+        planner._labels = FakeLabels()
+        planner._client = None  # Won't be used
+
+        # Simulate what happens after LLM returns a plan
+        import json
+        plan = {
+            "plan_summary": "Test plan",
+            "sub_tasks": [
+                {
+                    "title": "Task A",
+                    "description": "First task",
+                    "acceptance_criteria": ["AC1"],
+                    "depends_on": [],
+                    "estimated_files": ["a.py"],
+                },
+                {
+                    "title": "Task B",
+                    "description": "Depends on A",
+                    "acceptance_criteria": ["AC2"],
+                    "depends_on": [0],
+                    "estimated_files": ["b.py"],
+                },
+            ],
+            "risks": [],
+        }
+
+        # Monkey-patch the LLM call to return our plan
+        class FakeResponse:
+            class Content:
+                text = json.dumps(plan)
+            content = [Content()]
+
+        class FakeClient:
+            class messages:
+                @staticmethod
+                async def create(**kwargs):
+                    return FakeResponse()
+
+        planner._client = FakeClient()
+
+        from unittest.mock import patch
+        with patch("agent_grid.coordinator.planner.embed_metadata", side_effect=lambda text, meta: text):
+            result = await planner.decompose("owner/repo", 1, "Parent", "Body")
+
+        assert len(result) == 2
+
+        # First sub-issue: no Blocked by
+        first_body = created[0]["body"]
+        assert not first_body.startswith("Blocked by:")
+
+        # Second sub-issue: should have Blocked by: #100
+        second_body = created[1]["body"]
+        assert second_body.startswith("Blocked by: #100")
+
+        # Second should have ag/waiting label
+        assert "ag/waiting" in created[1]["labels"]

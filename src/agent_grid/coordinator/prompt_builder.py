@@ -21,8 +21,8 @@ def build_prompt(
     context = context or {}
     branch_name = f"agent/{issue.number}"
 
-    # Owner tag for PR body
-    owner_tag = f"\\n\\ncc @{issue.author} for review" if issue.author else ""
+    # PR flags for reviewer and label
+    reviewer_flag = f" --reviewer {issue.author}" if issue.author else ""
 
     # Format clarification thread if present
     clarification = ""
@@ -59,8 +59,8 @@ Issue #{issue.number}: {issue.title}
      `/ship` with a commit message, PR title, and body that references "Closes #{issue.number}"
    - Otherwise, manually:
      - Push your branch
-     - Create a PR using: gh pr create --title "..." --body "Closes #{issue.number}{owner_tag}\\n\\n..."
-     - Link PR to issue: gh pr edit --add-issue #{issue.number}
+     - Create PR with proper fields set:
+       gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/in-progress"{reviewer_flag}
    - **EXIT immediately after the PR is created.** Do not continue working.
      Your job is done once the PR exists. CI will run automatically.
 
@@ -287,10 +287,10 @@ Take a DIFFERENT approach based on the feedback. Start fresh:
 git checkout -b {new_branch}
 ```
 
-After implementation, push and create a PR:
+After implementation, push and create a PR with proper fields:
 ```bash
 git push -u origin {new_branch}
-gh pr create --title "..." --body "Closes #{issue.number}{owner_tag}\\n\\n..."
+gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/in-progress"{reviewer_flag}
 ```
 
 **EXIT immediately after the PR is created.** Your job is done. CI will run automatically.
