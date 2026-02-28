@@ -251,7 +251,11 @@ class Scheduler:
 
             labels_mgr = get_label_manager()
             await labels_mgr.transition_to(repo, issue_id, "ag/done")
+            # Mirror label onto PR
             tracker = get_issue_tracker()
+            from ..issue_tracker.github_client import GitHubClient
+            if isinstance(tracker, GitHubClient):
+                await tracker._add_label(repo, str(pr_number), "ag/done")
             await tracker.update_issue_status(repo, issue_id, IssueStatus.CLOSED)
             logger.info(f"PR #{pr_number} merged — issue #{issue_id} marked ag/done")
             return
@@ -317,24 +321,12 @@ class Scheduler:
             return
 
         # Fetch actual CI logs if check_output is empty (GitHub Actions doesn't populate output fields)
-        job_id = payload.get("job_id")
-        if not payload.get("check_output") and job_id and repo:
-            try:
-                from ..issue_tracker.github_client import GitHubClient
-
-                tracker = get_issue_tracker()
-                if isinstance(tracker, GitHubClient):
-                    logs = await tracker.get_actions_job_logs(repo, job_id)
-                    if logs:
-                        payload = {**payload, "check_output": logs}
-                        logger.info(f"Issue #{issue_id}: fetched {len(logs)} chars of CI logs")
-            except Exception as e:
-                logger.warning(f"Issue #{issue_id}: failed to fetch CI logs: {e}")
-
-        # Launch CI fix agent
         from .management_loop import get_management_loop
 
         loop = get_management_loop()
+        payload = await loop._enrich_check_output(repo, payload)
+
+        # Launch CI fix agent
         launched = await loop._launch_ci_fix(repo, payload)
 
         if not launched:
@@ -518,6 +510,12 @@ class Scheduler:
                         else:
                             # Implementation done — mark for review and notify owner
                             await labels_mgr.transition_to(repo, issue_id, "ag/review-pending")
+                            # Mirror label onto the PR itself for filtering
+                            if pr_number:
+                                tracker = get_issue_tracker()
+                                from ..issue_tracker.github_client import GitHubClient
+                                if isinstance(tracker, GitHubClient):
+                                    await tracker._add_label(repo, str(pr_number), "ag/review-pending")
                             await self._assign_and_tag_owner(repo, issue_id, pr_number)
 
         # Process any pending nudges now that we have capacity

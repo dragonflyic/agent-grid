@@ -413,6 +413,9 @@ def install_dry_run_wrappers() -> None:
     import agent_grid.coordinator.quality_gate as quality_gate_mod
     import agent_grid.coordinator.scanner as scanner_mod
 
+    import agent_grid.coordinator.ci_monitor as ci_monitor_mod
+
+    ci_monitor_mod._ci_monitor = None
     scanner_mod._scanner = None
     planner_mod._planner = None
     pr_monitor_mod._pr_monitor = None

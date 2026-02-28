@@ -389,6 +389,29 @@ class GitHubClient(IssueTracker):
         except httpx.HTTPStatusError as e:
             logger.warning(f"Failed to comment on PR #{pr_number}: {e}")
 
+    async def get_check_runs_for_ref(
+        self,
+        repo: str,
+        ref: str,
+        *,
+        status: str = "completed",
+    ) -> list[dict]:
+        """Return check runs for a commit SHA or branch ref.
+
+        Calls GET /repos/{repo}/commits/{ref}/check-runs.
+        Returns the raw list of check_run dicts (empty list on error).
+        """
+        try:
+            response = await self._client.get(
+                f"/repos/{repo}/commits/{ref}/check-runs",
+                params={"status": status, "per_page": 100},
+            )
+            response.raise_for_status()
+            return response.json().get("check_runs", [])
+        except Exception as e:
+            logger.warning(f"Failed to fetch check runs for {repo}@{ref}: {e}")
+            return []
+
     async def close(self) -> None:
         """Close the HTTP client."""
         await self._client.aclose()

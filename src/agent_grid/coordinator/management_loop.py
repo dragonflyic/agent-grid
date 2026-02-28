@@ -1,13 +1,15 @@
 """The Tech Lead's main cron loop.
 
-Runs every N seconds (default 1 hour). Each cycle performs 7 phases:
+Runs every N seconds (default 1 hour). Each cycle performs 9 phases:
 1. Scan — fetch unprocessed open issues
 2. Classify — SIMPLE/COMPLEX/BLOCKED/SKIP
 3. Act — spawn agents, create sub-issues, post questions
 4. Monitor in-progress — check agent statuses
 5. Monitor PRs — detect human review comments
 6. Monitor closed PRs — detect feedback on closed PRs
-7. Resolve blockers — unblock issues with human responses
+7. Poll CI failures — backup to webhook delivery
+8. Resolve blockers — unblock issues with human responses
+9. Proactive scan — find unlabeled issues suitable for automation
 """
 
 import asyncio
@@ -150,7 +152,18 @@ class ManagementLoop:
             if pr_info["issue_id"]:
                 await self._launch_retry(repo, pr_info)
 
-        # Phase 7: Resolve blockers — launch agents directly for unblocked issues
+        # Phase 7: Poll for CI failures (backup to webhook delivery)
+        from .ci_monitor import get_ci_monitor
+
+        ci_monitor = get_ci_monitor()
+        ci_failures = await ci_monitor.check_ci_failures(repo)
+        for check_info in ci_failures:
+            check_info = await self._enrich_check_output(repo, check_info)
+            await self._launch_ci_fix(repo, check_info)
+        if ci_failures:
+            logger.info(f"Phase 7: Found {len(ci_failures)} CI failures, launched fix agents")
+
+        # Phase 8: Resolve blockers — launch agents directly for unblocked issues
         blocker_resolver = get_blocker_resolver()
         unblocked = await blocker_resolver.check_blocked_issues(repo)
         for issue in unblocked:
@@ -386,6 +399,22 @@ class ManagementLoop:
                 retry_count=retry_count + 1,
             )
             logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent")
+
+    async def _enrich_check_output(self, repo: str, check_info: dict) -> dict:
+        """If check_output is empty, fetch actual CI logs via job ID."""
+        if check_info.get("check_output") or not check_info.get("job_id"):
+            return check_info
+        try:
+            from ..issue_tracker.github_client import GitHubClient
+
+            tracker = get_issue_tracker()
+            if isinstance(tracker, GitHubClient):
+                logs = await tracker.get_actions_job_logs(repo, check_info["job_id"])
+                if logs:
+                    return {**check_info, "check_output": logs}
+        except Exception as e:
+            logger.warning(f"Failed to fetch CI logs for job {check_info.get('job_id')}: {e}")
+        return check_info
 
     async def _launch_ci_fix(self, repo: str, check_info: dict) -> bool:
         """Launch an agent to fix a failing CI check on an agent PR.
