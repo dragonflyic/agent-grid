@@ -481,6 +481,10 @@ class GitHubClient(IssueTracker):
         user = data.get("user") or {}
         author = user.get("login", "")
 
+        # Extract assignees and node_id
+        assignees = [a["login"] for a in data.get("assignees", []) if a.get("login")]
+        node_id = data.get("node_id")
+
         return IssueInfo(
             id=str(data["number"]),
             number=data["number"],
@@ -489,6 +493,8 @@ class GitHubClient(IssueTracker):
             author=author,
             status=status,
             labels=labels,
+            assignees=assignees,
+            node_id=node_id,
             repo_url=f"https://github.com/{repo}",
             html_url=data["html_url"],
             parent_id=parent_id,
