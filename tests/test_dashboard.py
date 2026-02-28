@@ -2,10 +2,12 @@
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
 from agent_grid.dry_run import DryRunDatabase
+from agent_grid.execution_grid.public_api import AgentExecution, ExecutionStatus
 from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
 
 # ---------------------------------------------------------------------------
@@ -285,3 +287,125 @@ class TestDashboardActions:
 
         events = await db.get_pipeline_events("org/repo")
         assert events[0]["event_type"] == "manual_retry"
+
+
+# ---------------------------------------------------------------------------
+# Agent events DB tests
+# ---------------------------------------------------------------------------
+
+
+class TestAgentEventsDB:
+    """Test agent event CRUD on DryRunDatabase."""
+
+    @pytest.fixture
+    def db(self):
+        return DryRunDatabase()
+
+    @pytest.mark.asyncio
+    async def test_record_and_retrieve(self, db):
+        exec_id = uuid4()
+        await db.record_agent_event(exec_id, "text", content="Hello world")
+        await db.record_agent_event(
+            exec_id, "tool_use", content='{"command":"ls"}', tool_name="Bash", tool_id="t1"
+        )
+        await db.record_agent_event(exec_id, "tool_result", content="file1.py", tool_id="t1")
+
+        events = await db.get_agent_events(exec_id)
+        assert len(events) == 3
+        assert events[0]["message_type"] == "text"
+        assert events[1]["tool_name"] == "Bash"
+        assert events[2]["tool_id"] == "t1"
+
+    @pytest.mark.asyncio
+    async def test_events_scoped_to_execution(self, db):
+        exec1, exec2 = uuid4(), uuid4()
+        await db.record_agent_event(exec1, "text", content="exec1 msg")
+        await db.record_agent_event(exec2, "text", content="exec2 msg")
+
+        events1 = await db.get_agent_events(exec1)
+        assert len(events1) == 1
+        assert events1[0]["content"] == "exec1 msg"
+
+    @pytest.mark.asyncio
+    async def test_pagination(self, db):
+        exec_id = uuid4()
+        for i in range(10):
+            await db.record_agent_event(exec_id, "text", content=f"msg {i}")
+
+        page = await db.get_agent_events(exec_id, limit=3, offset=0)
+        assert len(page) == 3
+
+        page2 = await db.get_agent_events(exec_id, limit=3, offset=3)
+        assert len(page2) == 3
+        assert page[0]["content"] != page2[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Dashboard execution detail tests
+# ---------------------------------------------------------------------------
+
+
+class TestDashboardExecutionDetail:
+    @pytest.mark.asyncio
+    async def test_issue_detail_includes_execution_fields(self):
+        """GET /issues/{n} returns full execution details including prompt."""
+        from agent_grid.coordinator.dashboard_api import get_issue_detail
+
+        db = DryRunDatabase()
+        exec_id = uuid4()
+        execution = AgentExecution(
+            id=exec_id,
+            repo_url="https://github.com/org/repo.git",
+            status=ExecutionStatus.COMPLETED,
+            prompt="Fix the bug in auth.py",
+            mode="implement",
+        )
+        await db.create_execution(execution, issue_id="42")
+
+        mock_tracker = AsyncMock()
+        mock_tracker.get_issue.return_value = _make_issue(42, title="Auth bug")
+
+        with (
+            patch("agent_grid.issue_tracker.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.database.get_database", return_value=db),
+            patch("agent_grid.config.settings", MagicMock(target_repo="org/repo")),
+        ):
+            result = await get_issue_detail(42)
+
+        assert len(result["executions"]) == 1
+        ex = result["executions"][0]
+        assert ex["prompt"] == "Fix the bug in auth.py"
+        assert ex["id"] == str(exec_id)
+        assert "session_link" in ex
+        assert "cost_cents" in ex
+
+
+class TestExecutionEventsEndpoint:
+    @pytest.mark.asyncio
+    async def test_returns_events(self):
+        """GET /executions/{id}/events returns agent events."""
+        from agent_grid.coordinator.dashboard_api import get_execution_events
+
+        db = DryRunDatabase()
+        exec_id = uuid4()
+        await db.record_agent_event(exec_id, "text", content="Hello")
+        await db.record_agent_event(exec_id, "tool_use", tool_name="Bash", content="ls")
+
+        with patch("agent_grid.coordinator.database.get_database", return_value=db):
+            result = await get_execution_events(str(exec_id))
+
+        assert len(result) == 2
+        assert result[0]["message_type"] == "text"
+        assert result[1]["tool_name"] == "Bash"
+
+    @pytest.mark.asyncio
+    async def test_empty_for_unknown_execution(self):
+        """GET /executions/{id}/events returns empty for unknown ID."""
+        from agent_grid.coordinator.dashboard_api import get_execution_events
+
+        db = DryRunDatabase()
+
+        with patch("agent_grid.coordinator.database.get_database", return_value=db):
+            result = await get_execution_events(str(uuid4()))
+
+        assert result == []

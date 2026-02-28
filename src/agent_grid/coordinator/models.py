@@ -33,6 +33,8 @@ class ExecutionModel(Base):
     branch: Mapped[str | None] = mapped_column(Text, nullable=True)
     checkpoint: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     external_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
@@ -131,4 +133,27 @@ class PipelineEventModel(Base):
         Index("idx_pipeline_events_issue", "issue_number", "repo"),
         Index("idx_pipeline_events_type", "event_type"),
         Index("idx_pipeline_events_repo_created", "repo", "created_at"),
+    )
+
+
+class AgentEventModel(Base):
+    """Append-only log of agent chat/tool events during execution."""
+
+    __tablename__ = "agent_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    message_type: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+
+    __table_args__ = (
+        Index("idx_agent_events_execution_id", "execution_id"),
+        Index("idx_agent_events_execution_created", "execution_id", "created_at"),
     )

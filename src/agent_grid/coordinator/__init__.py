@@ -1,5 +1,6 @@
 """Coordinator module for agent orchestration."""
 
+from .agent_event_persister import AgentEventPersister, get_agent_event_persister
 from .blocker_resolver import BlockerResolver, get_blocker_resolver
 from .budget_manager import BudgetManager, get_budget_manager
 from .chat_logger import AgentEventLogger, get_agent_event_logger
@@ -32,6 +33,8 @@ __all__ = [
     "coordinator_router",
     "dashboard_router",
     # Services
+    "AgentEventPersister",
+    "get_agent_event_persister",
     "Scheduler",
     "get_scheduler",
     "NudgeHandler",

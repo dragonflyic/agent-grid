@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ..config import settings
 from ..execution_grid import AgentExecution, ExecutionStatus
 from .models import (
+    AgentEventModel,
     BudgetUsageModel,
     CronStateModel,
     ExecutionModel,
@@ -575,6 +576,111 @@ class Database:
                 }
                 for m in result.scalars().all()
             ]
+
+    # -------------------------------------------------------------------------
+    # Agent events (execution-level audit trail)
+    # -------------------------------------------------------------------------
+
+    async def record_agent_event(
+        self,
+        execution_id: UUID,
+        message_type: str,
+        content: str | None = None,
+        tool_name: str | None = None,
+        tool_id: str | None = None,
+    ) -> None:
+        """Append an agent chat/tool event to the audit log."""
+        async with self._session() as session:
+            session.add(
+                AgentEventModel(
+                    execution_id=execution_id,
+                    message_type=message_type,
+                    content=content,
+                    tool_name=tool_name,
+                    tool_id=tool_id,
+                )
+            )
+            await session.commit()
+
+    async def get_agent_events(
+        self,
+        execution_id: UUID,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Get agent events for an execution, oldest first."""
+        async with self._session() as session:
+            result = await session.execute(
+                select(AgentEventModel)
+                .where(AgentEventModel.execution_id == execution_id)
+                .order_by(AgentEventModel.created_at.asc())
+                .limit(limit)
+                .offset(offset)
+            )
+            return [
+                {
+                    "id": str(m.id),
+                    "execution_id": str(m.execution_id),
+                    "message_type": m.message_type,
+                    "content": m.content,
+                    "tool_name": m.tool_name,
+                    "tool_id": m.tool_id,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in result.scalars().all()
+            ]
+
+    async def list_executions_for_dashboard(
+        self,
+        issue_id: str,
+        limit: int = 20,
+    ) -> list[dict]:
+        """List executions with all fields for dashboard display."""
+        async with self._session() as session:
+            result = await session.execute(
+                select(ExecutionModel)
+                .where(ExecutionModel.issue_id == issue_id)
+                .order_by(ExecutionModel.created_at.desc())
+                .limit(limit)
+            )
+            return [
+                {
+                    "id": str(m.id),
+                    "status": m.status,
+                    "mode": m.mode,
+                    "prompt": m.prompt,
+                    "result": m.result,
+                    "pr_number": m.pr_number,
+                    "branch": m.branch,
+                    "external_run_id": m.external_run_id,
+                    "session_link": m.session_link,
+                    "cost_cents": m.cost_cents,
+                    "started_at": m.started_at.isoformat() if m.started_at else None,
+                    "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in result.scalars().all()
+            ]
+
+    async def set_session_link(self, execution_id: UUID, session_link: str) -> None:
+        """Store the Oz session link for an execution."""
+        async with self._session() as session:
+            await session.execute(
+                update(ExecutionModel)
+                .where(ExecutionModel.id == execution_id)
+                .values(session_link=session_link)
+            )
+            await session.commit()
+
+    async def set_cost(self, execution_id: UUID, cost_cents: int) -> None:
+        """Store the execution cost in cents."""
+        async with self._session() as session:
+            await session.execute(
+                update(ExecutionModel)
+                .where(ExecutionModel.id == execution_id)
+                .values(cost_cents=cost_cents)
+            )
+            await session.commit()
 
     async def get_active_executions_with_external_run_id(self) -> list[tuple[UUID, str]]:
         """Get all pending/running executions that have an external_run_id.

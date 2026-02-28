@@ -14,6 +14,7 @@ from .coordinator import (
     coordinator_router,
     dashboard_router,
     get_agent_event_logger,
+    get_agent_event_persister,
     get_database,
     get_management_loop,
     get_scheduler,
@@ -61,6 +62,9 @@ async def _connect_and_start_services(db, logger) -> None:
     agent_logger = get_agent_event_logger()
     await agent_logger.start()
 
+    event_persister = get_agent_event_persister()
+    await event_persister.start()
+
     # Start Oz polling if using Oz backend
     if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
         from .execution_grid.oz_grid import get_oz_execution_grid
@@ -102,6 +106,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     agent_logger = get_agent_event_logger()
     await agent_logger.stop()
+    event_persister = get_agent_event_persister()
+    await event_persister.stop()
     management_loop = get_management_loop()
     await management_loop.stop()
     scheduler = get_scheduler()

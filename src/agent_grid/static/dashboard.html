@@ -397,11 +397,56 @@ async function showDetail(issueNumber) {
     if (data.executions?.length) {
       html += `<h3 style="margin-top:16px">Executions</h3>`;
       data.executions.forEach(ex => {
-        html += `<div style="padding:4px 0;font-size:13px">
-          <strong>${ex.mode || '?'}</strong> — ${ex.status}
-          (${fmtTime(ex.started_at)} → ${fmtTime(ex.completed_at)})
-          ${ex.result ? '<br><span style="color:var(--muted)">' + esc(ex.result).slice(0, 200) + '</span>' : ''}
+        const statusClass = ex.status === 'completed' ? 'done' : ex.status === 'failed' ? 'failed' : 'in-progress';
+        html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">`;
+        html += `<div style="display:flex;justify-content:space-between;align-items:center">
+          <span><strong>${ex.mode || '?'}</strong> <span class="stage-badge stage-${statusClass}">${ex.status}</span></span>
+          <span style="color:var(--muted);font-size:12px">${fmtTime(ex.started_at)} → ${fmtTime(ex.completed_at)}</span>
         </div>`;
+
+        // PR/branch info
+        if (ex.pr_number || ex.branch) {
+          html += `<div style="margin-top:4px">`;
+          if (ex.pr_number) {
+            const repo = data.repo || '';
+            html += `<a href="https://github.com/${repo}/pull/${ex.pr_number}" target="_blank">PR #${ex.pr_number}</a> `;
+          }
+          if (ex.branch) html += `<span style="color:var(--muted);font-size:12px">branch: ${esc(ex.branch)}</span>`;
+          html += `</div>`;
+        }
+
+        // Session link (Oz) + cost
+        if (ex.session_link || ex.cost_cents != null) {
+          html += `<div style="margin-top:4px">`;
+          if (ex.session_link) html += `<a href="${esc(ex.session_link)}" target="_blank" style="color:var(--purple)">View in Oz</a> `;
+          if (ex.cost_cents != null) html += `<span style="color:var(--muted);font-size:12px">Cost: $${(ex.cost_cents / 100).toFixed(2)}</span>`;
+          html += `</div>`;
+        }
+
+        // Expandable prompt
+        if (ex.prompt) {
+          html += `<details style="margin-top:4px">
+            <summary style="cursor:pointer;color:var(--accent);font-size:12px">Show prompt</summary>
+            <pre style="margin-top:4px;padding:8px;background:var(--bg);border-radius:4px;font-size:11px;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word">${esc(ex.prompt)}</pre>
+          </details>`;
+        }
+
+        // Expandable result
+        if (ex.result) {
+          html += `<details style="margin-top:4px">
+            <summary style="cursor:pointer;color:var(--muted);font-size:12px">Show result</summary>
+            <pre style="margin-top:4px;padding:8px;background:var(--bg);border-radius:4px;font-size:11px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word">${esc(ex.result)}</pre>
+          </details>`;
+        }
+
+        // Execution timeline (lazy-loaded)
+        const tlId = 'tl-' + ex.id.replace(/-/g, '').slice(0, 12);
+        html += `<details style="margin-top:4px" ontoggle="if(this.open)loadTimeline('${ex.id}','${tlId}')">
+          <summary style="cursor:pointer;color:var(--accent);font-size:12px">Show execution timeline</summary>
+          <div id="${tlId}" style="margin-top:8px;max-height:400px;overflow-y:auto"><div class="loading">Loading...</div></div>
+        </details>`;
+
+        html += `</div>`;
       });
     }
 
@@ -453,6 +498,31 @@ async function classifyIssue(num) {
     alert(r?.error ? `Error: ${r.error}` : `Classified as ${r?.classification}: ${r?.reason}`);
     closeModal(); refresh();
   } catch (e) { alert(`Error: ${e.message}`); }
+}
+
+async function loadTimeline(executionId, containerId) {
+  const el = document.getElementById(containerId);
+  try {
+    const events = await fetchJSON(`${API}/executions/${executionId}/events`);
+    if (!events.length) {
+      el.innerHTML = '<div style="color:var(--muted);font-size:12px">No events recorded (Oz executions: use "View in Oz" link above)</div>';
+      return;
+    }
+    el.innerHTML = events.map(ev => {
+      let icon = '💬';
+      if (ev.message_type === 'tool_use') icon = '🔧';
+      else if (ev.message_type === 'tool_result') icon = '📎';
+      else if (ev.message_type === 'system') icon = '⚙️';
+      else if (ev.message_type === 'result') icon = '🏁';
+      const label = ev.message_type === 'tool_use' ? (ev.tool_name || 'tool') : ev.message_type;
+      const content = ev.content ? esc(ev.content.length > 300 ? ev.content.slice(0, 300) + '...' : ev.content) : '';
+      return `<div class="timeline-item">
+        <span class="time">${fmtTime(ev.created_at)}</span>
+        <span class="type">${icon} ${label}</span>
+        ${content ? `<div class="detail">${content}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) { el.innerHTML = `<div class="error">${e.message}</div>`; }
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }

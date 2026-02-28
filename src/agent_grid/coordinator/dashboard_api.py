@@ -151,7 +151,7 @@ async def get_issue_detail(issue_number: int, repo: str | None = None) -> dict:
 
     state = await db.get_issue_state(issue_number, actual_repo)
     events = await db.get_pipeline_events(actual_repo, issue_number=issue_number, limit=50)
-    executions = await db.list_executions(issue_id=str(issue_number), limit=20)
+    executions = await db.list_executions_for_dashboard(issue_id=str(issue_number), limit=20)
 
     github_info = None
     try:
@@ -172,17 +172,7 @@ async def get_issue_detail(issue_number: int, repo: str | None = None) -> dict:
         "github": github_info,
         "db_state": state,
         "pipeline_events": events,
-        "executions": [
-            {
-                "id": str(e.id),
-                "status": e.status.value if hasattr(e.status, "value") else e.status,
-                "mode": e.mode,
-                "result": e.result,
-                "started_at": e.started_at.isoformat() if e.started_at else None,
-                "completed_at": e.completed_at.isoformat() if e.completed_at else None,
-            }
-            for e in executions
-        ],
+        "executions": executions,
     }
 
 
@@ -208,6 +198,26 @@ async def activity_feed(
         limit=limit,
         offset=offset,
     )
+
+
+@dashboard_router.get("/executions/{execution_id}/events")
+async def get_execution_events(
+    execution_id: str,
+    limit: int = 500,
+    offset: int = 0,
+) -> list[dict]:
+    """Get agent chat/tool events for an execution."""
+    from uuid import UUID as _UUID
+
+    from .database import get_database
+
+    db = get_database()
+    try:
+        exec_uuid = _UUID(execution_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid execution_id")
+
+    return await db.get_agent_events(exec_uuid, limit=limit, offset=offset)
 
 
 # ---------------------------------------------------------------------------

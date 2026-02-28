@@ -354,6 +354,76 @@ class DryRunDatabase:
         results = [s for s in self._issue_states.values() if s.get("repo") == repo]
         return results[offset : offset + limit]
 
+    # Agent events (execution-level audit trail)
+
+    async def record_agent_event(
+        self,
+        execution_id: UUID,
+        message_type: str,
+        content: str | None = None,
+        tool_name: str | None = None,
+        tool_id: str | None = None,
+    ) -> None:
+        if not hasattr(self, "_agent_events"):
+            self._agent_events: list[dict] = []
+        self._agent_events.append(
+            {
+                "id": str(uuid4()),
+                "execution_id": str(execution_id),
+                "message_type": message_type,
+                "content": content,
+                "tool_name": tool_name,
+                "tool_id": tool_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    async def get_agent_events(
+        self,
+        execution_id: UUID,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict]:
+        events = getattr(self, "_agent_events", [])
+        filtered = [e for e in events if e["execution_id"] == str(execution_id)]
+        filtered.sort(key=lambda e: e["created_at"])
+        return filtered[offset : offset + limit]
+
+    async def list_executions_for_dashboard(
+        self,
+        issue_id: str,
+        limit: int = 20,
+    ) -> list[dict]:
+        results = []
+        for entry in self._executions.values():
+            if entry["issue_id"] == issue_id:
+                e = entry["execution"]
+                s = e.status.value if hasattr(e.status, "value") else e.status
+                results.append(
+                    {
+                        "id": str(e.id),
+                        "status": s,
+                        "mode": e.mode,
+                        "prompt": e.prompt,
+                        "result": e.result,
+                        "pr_number": None,
+                        "branch": None,
+                        "external_run_id": None,
+                        "session_link": None,
+                        "cost_cents": None,
+                        "started_at": e.started_at.isoformat() if e.started_at else None,
+                        "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+                        "created_at": e.created_at.isoformat() if hasattr(e, "created_at") and e.created_at else None,
+                    }
+                )
+        return results[:limit]
+
+    async def set_session_link(self, execution_id: UUID, session_link: str) -> None:
+        pass
+
+    async def set_cost(self, execution_id: UUID, cost_cents: int) -> None:
+        pass
+
 
 class DryRunLabelManager:
     """Intercepts label changes and logs them instead of applying."""
