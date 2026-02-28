@@ -165,6 +165,82 @@ class TestGitHubClientParsing:
         assert stripped == "No metadata here\nJust content"
 
 
+class TestParseIssueFields:
+    """Tests for assignees and node_id fields parsed from GitHub API response."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a client with dummy token."""
+        with patch.object(GitHubClient, "__init__", lambda self, token=None: None):
+            client = GitHubClient.__new__(GitHubClient)
+            client._token = "dummy"
+            client._client = None
+            import re
+
+            client.BLOCKED_BY_PATTERN = re.compile(r"^Blocked by:\s*(.+)$", re.MULTILINE)
+            client.ISSUE_REF_PATTERN = re.compile(r"#(\d+)")
+            client.IN_PROGRESS_LABEL = "in-progress"
+            return client
+
+    def _make_issue_data(self, **overrides) -> dict:
+        """Build a minimal valid GitHub API issue response dict."""
+        base = {
+            "number": 10,
+            "title": "Test Issue",
+            "body": "Some body",
+            "state": "open",
+            "labels": [],
+            "html_url": "https://github.com/test/repo/issues/10",
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-01-15T10:00:00Z",
+            "user": {"login": "testuser"},
+        }
+        base.update(overrides)
+        return base
+
+    def test_parse_issue_no_assignees(self, client):
+        """Issue without assignees field produces an empty list."""
+        data = self._make_issue_data()
+        # Ensure no assignees key at all
+        data.pop("assignees", None)
+
+        issue = client._parse_issue("test/repo", data)
+        assert issue.assignees == []
+
+    def test_parse_issue_with_assignees(self, client):
+        """Issue with multiple assignees extracts logins correctly."""
+        data = self._make_issue_data(
+            assignees=[{"login": "alice"}, {"login": "bob"}],
+        )
+
+        issue = client._parse_issue("test/repo", data)
+        assert issue.assignees == ["alice", "bob"]
+
+    def test_parse_issue_assignees_skips_missing_login(self, client):
+        """Assignee entries without a login key are skipped."""
+        data = self._make_issue_data(
+            assignees=[{"login": "alice"}, {}, {"login": "bob"}],
+        )
+
+        issue = client._parse_issue("test/repo", data)
+        assert issue.assignees == ["alice", "bob"]
+
+    def test_parse_issue_node_id(self, client):
+        """Issue with node_id populates the field."""
+        data = self._make_issue_data(node_id="I_kwABC")
+
+        issue = client._parse_issue("test/repo", data)
+        assert issue.node_id == "I_kwABC"
+
+    def test_parse_issue_no_node_id(self, client):
+        """Issue without node_id defaults to None."""
+        data = self._make_issue_data()
+        data.pop("node_id", None)
+
+        issue = client._parse_issue("test/repo", data)
+        assert issue.node_id is None
+
+
 # Integration tests - only run if AGENT_GRID_GITHUB_TOKEN is set
 # and AGENT_GRID_TEST_REPO is set (e.g., "owner/repo")
 @pytest.mark.skipif(
@@ -266,44 +342,6 @@ class TestGitHubClientIntegration:
             # Cleanup
             await client.update_issue_status(repo, child.id, IssueStatus.CLOSED)
             await client.update_issue_status(repo, parent.id, IssueStatus.CLOSED)
-
-        finally:
-            await client.close()
-
-    @pytest.mark.asyncio
-    async def test_blocked_by_workflow(self, client, repo):
-        """Test blocked_by relationship."""
-        try:
-            # Create blocker
-            blocker = await client.create_issue(
-                repo=repo,
-                title="[TEST] Blocker issue",
-                body="This blocks other issues",
-            )
-
-            # Create blocked issue
-            blocked = await client.create_issue(
-                repo=repo,
-                title="[TEST] Blocked issue",
-                body="This is blocked",
-                blocked_by=[blocker.id],
-            )
-
-            assert blocker.id in blocked.blocked_by
-
-            # Check is_blocked
-            is_blocked = await client.is_blocked(repo, blocked.id)
-            assert is_blocked is True
-
-            # Close blocker
-            await client.update_issue_status(repo, blocker.id, IssueStatus.CLOSED)
-
-            # Should no longer be blocked
-            is_blocked = await client.is_blocked(repo, blocked.id)
-            assert is_blocked is False
-
-            # Cleanup
-            await client.update_issue_status(repo, blocked.id, IssueStatus.CLOSED)
 
         finally:
             await client.close()

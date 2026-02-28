@@ -84,12 +84,15 @@ class OzExecutionGrid(ExecutionGrid):
 
             self._run_map[execution_id] = response.run_id
 
-            # Persist oz_run_id to DB so we can recover after process restart
+            # Persist oz_run_id and session_link to DB
             try:
                 from ..coordinator.database import get_database
 
                 db = get_database()
                 await db.set_external_run_id(execution_id, response.run_id)
+                session_link = getattr(response, "session_link", None)
+                if session_link:
+                    await db.set_session_link(execution_id, session_link)
             except Exception as e:
                 logger.warning(f"Failed to persist oz_run_id to DB: {e}")
 
@@ -198,6 +201,20 @@ class OzExecutionGrid(ExecutionGrid):
 
                 # Build result summary
                 result = run.status_message.message if run.status_message else None
+
+                # Capture cost from request_usage
+                request_usage = getattr(run, "request_usage", None)
+                if request_usage:
+                    try:
+                        from ..coordinator.database import get_database as _get_db
+
+                        compute = getattr(request_usage, "compute_cost", 0) or 0
+                        inference = getattr(request_usage, "inference_cost", 0) or 0
+                        total = compute + inference
+                        if total > 0:
+                            await _get_db().set_cost(exec_id, int(total * 100))
+                    except Exception as e:
+                        logger.warning(f"Failed to persist cost for {exec_id}: {e}")
 
                 if run.state == "SUCCEEDED":
                     execution = self._executions.get(exec_id)

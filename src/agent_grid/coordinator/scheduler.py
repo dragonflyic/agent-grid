@@ -5,6 +5,7 @@ pipeline. The scheduler focuses on real-time event-driven reactions:
 - Webhook-triggered issue creation → classify + launch immediately
 - Issue comments on ag/* issues → unblock or trigger re-work
 - PR review comments → launch address_review agent
+- PR comments (regular) → launch address_review agent on agent branches
 - PR closed → launch retry agent
 - Nudge requests → immediate agent launch
 - Agent completion → save checkpoint, update labels
@@ -16,13 +17,10 @@ import re
 from uuid import UUID
 
 from ..execution_grid import (
-    AgentExecution,
     Event,
     EventType,
-    ExecutionConfig,
     ExecutionStatus,
     event_bus,
-    get_execution_grid,
     utc_now,
 )
 from ..issue_tracker import get_issue_tracker
@@ -86,6 +84,8 @@ class Scheduler:
                 await self._handle_agent_failed(event)
             elif event.type == EventType.PR_REVIEW:
                 await self._handle_pr_review(event)
+            elif event.type == EventType.PR_COMMENT:
+                await self._handle_pr_comment(event)
             elif event.type == EventType.PR_CLOSED:
                 await self._handle_pr_closed(event)
             elif event.type == EventType.CHECK_RUN_FAILED:
@@ -229,6 +229,54 @@ class Scheduler:
                 await loop._launch_review_handler(repo, pr_info)
                 break
 
+    async def _handle_pr_comment(self, event: Event) -> None:
+        """Handle regular PR comment — launch address_review if on an agent branch."""
+        payload = event.payload
+        repo = payload.get("repo")
+        pr_number = payload.get("pr_number")
+        comment_body = payload.get("comment_body", "")
+
+        if not repo or not pr_number:
+            return
+
+        # Fetch the PR to get the branch name
+        tracker = get_issue_tracker()
+        from ..issue_tracker.github_client import GitHubClient
+
+        if not isinstance(tracker, GitHubClient):
+            return
+
+        try:
+            resp = await tracker._client.get(f"/repos/{repo}/pulls/{pr_number}")
+            resp.raise_for_status()
+            pr_data = resp.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch PR #{pr_number}: {e}")
+            return
+
+        head_branch = pr_data.get("head", {}).get("ref", "")
+        if not head_branch.startswith("agent/"):
+            return
+
+        match = re.match(r"agent/(\d+)(?:-|$)", head_branch)
+        if not match:
+            return
+        issue_id = match.group(1)
+
+        # Build pr_info and launch via the review handler
+        pr_info = {
+            "pr_number": pr_number,
+            "issue_id": issue_id,
+            "branch": head_branch,
+            "review_comments": comment_body,
+        }
+
+        from .management_loop import get_management_loop
+
+        loop = get_management_loop()
+        await loop._launch_review_handler(repo, pr_info)
+        logger.info(f"PR #{pr_number}: launched agent from PR comment")
+
     async def _handle_pr_closed(self, event: Event) -> None:
         """Handle PR closed — transition to ag/done if merged, retry if not."""
         payload = event.payload
@@ -251,7 +299,12 @@ class Scheduler:
 
             labels_mgr = get_label_manager()
             await labels_mgr.transition_to(repo, issue_id, "ag/done")
+            # Mirror label onto PR
             tracker = get_issue_tracker()
+            from ..issue_tracker.github_client import GitHubClient
+
+            if isinstance(tracker, GitHubClient):
+                await tracker._add_label(repo, str(pr_number), "ag/done")
             await tracker.update_issue_status(repo, issue_id, IssueStatus.CLOSED)
             logger.info(f"PR #{pr_number} merged — issue #{issue_id} marked ag/done")
             return
@@ -317,24 +370,12 @@ class Scheduler:
             return
 
         # Fetch actual CI logs if check_output is empty (GitHub Actions doesn't populate output fields)
-        job_id = payload.get("job_id")
-        if not payload.get("check_output") and job_id and repo:
-            try:
-                from ..issue_tracker.github_client import GitHubClient
-
-                tracker = get_issue_tracker()
-                if isinstance(tracker, GitHubClient):
-                    logs = await tracker.get_actions_job_logs(repo, job_id)
-                    if logs:
-                        payload = {**payload, "check_output": logs}
-                        logger.info(f"Issue #{issue_id}: fetched {len(logs)} chars of CI logs")
-            except Exception as e:
-                logger.warning(f"Issue #{issue_id}: failed to fetch CI logs: {e}")
-
-        # Launch CI fix agent
         from .management_loop import get_management_loop
 
         loop = get_management_loop()
+        payload = await loop._enrich_check_output(repo, payload)
+
+        # Launch CI fix agent
         launched = await loop._launch_ci_fix(repo, payload)
 
         if not launched:
@@ -380,6 +421,18 @@ class Scheduler:
             issue_number=issue.number,
             repo=repo,
             classification=classification.category,
+        )
+        await self._db.record_pipeline_event(
+            issue.number,
+            repo,
+            "classified",
+            "classify",
+            {
+                "category": classification.category,
+                "reason": classification.reason,
+                "estimated_complexity": classification.estimated_complexity,
+                "source": "webhook",
+            },
         )
 
         from .management_loop import get_management_loop
@@ -518,6 +571,13 @@ class Scheduler:
                         else:
                             # Implementation done — mark for review and notify owner
                             await labels_mgr.transition_to(repo, issue_id, "ag/review-pending")
+                            # Mirror label onto the PR itself for filtering
+                            if pr_number:
+                                tracker = get_issue_tracker()
+                                from ..issue_tracker.github_client import GitHubClient
+
+                                if isinstance(tracker, GitHubClient):
+                                    await tracker._add_label(repo, str(pr_number), "ag/review-pending")
                             await self._assign_and_tag_owner(repo, issue_id, pr_number)
 
         # Process any pending nudges now that we have capacity
@@ -580,64 +640,43 @@ class Scheduler:
     # Helpers
     # -------------------------------------------------------------------------
 
-    async def _try_launch_agent(self, issue_id: str, repo: str) -> UUID | None:
-        """Attempt to launch an agent for an issue."""
+    async def _try_launch_agent(self, issue_id: str, repo: str) -> bool:
+        """Attempt to launch an agent for an issue.
+
+        Uses _claim_and_launch to claim the DB row FIRST, then launch the machine.
+        """
         logger.info(f"Attempting to launch agent: issue_id={issue_id}, repo={repo}")
 
         can_launch, reason = await self._budget_manager.can_launch_agent()
         if not can_launch:
             logger.warning(f"Budget check failed: {reason}")
-            return None
-
-        existing = await self._db.get_execution_for_issue(issue_id)
-        if existing and existing.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
-            logger.info(f"Execution already active for issue {issue_id}")
-            return None
+            return False
 
         tracker = get_issue_tracker()
         try:
             issue = await tracker.get_issue(repo, issue_id)
         except Exception as e:
             logger.error(f"Failed to get issue {issue_id} from {repo}: {e}")
-            return None
+            return False
 
         prompt = build_prompt(issue, repo, mode="implement")
-
         repo_url = f"https://github.com/{repo}.git"
-        config = ExecutionConfig(
+
+        from .management_loop import get_management_loop
+
+        loop = get_management_loop()
+        launched = await loop._claim_and_launch(
+            issue_id=issue_id,
             repo_url=repo_url,
-            prompt=prompt,
-        )
-
-        grid = get_execution_grid()
-
-        from ..execution_grid.fly_grid import FlyExecutionGrid
-        from ..execution_grid.oz_grid import OzExecutionGrid
-
-        if isinstance(grid, (FlyExecutionGrid, OzExecutionGrid)):
-            execution_id = await grid.launch_agent(
-                config,
-                mode="implement",
-                issue_number=issue.number,
-            )
-        else:
-            execution_id = await grid.launch_agent(config)
-
-        execution = AgentExecution(
-            id=execution_id,
-            repo_url=repo_url,
-            status=ExecutionStatus.PENDING,
             prompt=prompt,
             mode="implement",
-            started_at=utc_now(),
+            issue_number=issue.number,
         )
-        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
-        if not claimed:
-            logger.info(f"Lost claim race for issue {issue_id}")
-            return None
-        logger.info(f"Launched agent {execution_id} for issue {issue_id}")
+        if not launched:
+            return False
 
-        return execution_id
+        logger.info(f"Launched agent for issue {issue_id}")
+        return True
 
     async def _process_pending_nudges(self) -> None:
         """Process pending nudge requests."""

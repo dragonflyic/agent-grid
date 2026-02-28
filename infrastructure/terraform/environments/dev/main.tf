@@ -204,6 +204,8 @@ module "ecs_scheduled_task" {
     AGENT_GRID_FLY_WORKER_IMAGE          = var.fly_worker_image
     AGENT_GRID_DRY_RUN                   = var.dry_run ? "true" : "false"
     AGENT_GRID_PROACTIVE_SCAN_ENABLED    = "true"
+    AGENT_GRID_GITHUB_PROJECT_OWNER      = var.github_project_owner
+    AGENT_GRID_GITHUB_PROJECT_NUMBER     = var.github_project_number
     PYTHONPATH                           = "/app/src"
     PYTHONUNBUFFERED                     = "1"
   }

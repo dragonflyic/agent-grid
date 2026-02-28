@@ -1,6 +1,9 @@
 """Tests for coordinator module."""
 
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
+
+import pytest
 
 from agent_grid.coordinator import NudgeRequest
 
@@ -168,3 +171,417 @@ class TestScheduler:
         prompt = build_prompt(issue, "owner/repo", mode="implement")
         assert "Fix bug" in prompt
         assert "crashes on startup" in prompt
+
+
+class TestCheckRunWebhook:
+    """Tests for _handle_check_run_event webhook handler."""
+
+    @pytest.mark.asyncio
+    @patch("agent_grid.issue_tracker.webhook_handler.event_bus")
+    async def test_check_run_with_pull_requests(self, mock_event_bus):
+        """check_run with pull_requests populated uses PR head ref, sha, and number."""
+        from agent_grid.execution_grid import EventType
+        from agent_grid.issue_tracker.webhook_handler import _handle_check_run_event
+
+        mock_event_bus.publish = AsyncMock()
+
+        data = {
+            "action": "completed",
+            "check_run": {
+                "conclusion": "failure",
+                "name": "ci-test",
+                "id": 111,
+                "html_url": "https://github.com/owner/repo/runs/111",
+                "output": {},
+                "pull_requests": [
+                    {
+                        "number": 99,
+                        "head": {"ref": "agent/42", "sha": "abc123"},
+                    }
+                ],
+            },
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        await _handle_check_run_event(data)
+
+        mock_event_bus.publish.assert_called_once()
+        call_args = mock_event_bus.publish.call_args
+        assert call_args[0][0] == EventType.CHECK_RUN_FAILED
+        payload = call_args[0][1]
+        assert payload["branch"] == "agent/42"
+        assert payload["head_sha"] == "abc123"
+        assert payload["pr_number"] == 99
+        assert payload["repo"] == "owner/repo"
+
+    @pytest.mark.asyncio
+    @patch("agent_grid.issue_tracker.webhook_handler.event_bus")
+    async def test_check_run_fallback_to_check_suite(self, mock_event_bus):
+        """check_run with empty pull_requests falls back to check_suite.head_branch."""
+        from agent_grid.execution_grid import EventType
+        from agent_grid.issue_tracker.webhook_handler import _handle_check_run_event
+
+        mock_event_bus.publish = AsyncMock()
+
+        data = {
+            "action": "completed",
+            "check_run": {
+                "conclusion": "failure",
+                "name": "ci-test",
+                "id": 222,
+                "html_url": "https://github.com/owner/repo/runs/222",
+                "head_sha": "abc123",
+                "output": {},
+                "pull_requests": [],
+                "check_suite": {"head_branch": "agent/42"},
+            },
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        await _handle_check_run_event(data)
+
+        mock_event_bus.publish.assert_called_once()
+        call_args = mock_event_bus.publish.call_args
+        assert call_args[0][0] == EventType.CHECK_RUN_FAILED
+        payload = call_args[0][1]
+        assert payload["branch"] == "agent/42"
+        assert payload["head_sha"] == "abc123"
+        assert payload["pr_number"] is None
+
+    @pytest.mark.asyncio
+    @patch("agent_grid.issue_tracker.webhook_handler.event_bus")
+    async def test_check_run_non_agent_branch_dropped(self, mock_event_bus):
+        """check_run on a non-agent branch (e.g. main) should not publish."""
+        from agent_grid.issue_tracker.webhook_handler import _handle_check_run_event
+
+        mock_event_bus.publish = AsyncMock()
+
+        data = {
+            "action": "completed",
+            "check_run": {
+                "conclusion": "failure",
+                "name": "ci-test",
+                "id": 333,
+                "html_url": "https://github.com/owner/repo/runs/333",
+                "head_sha": "def456",
+                "output": {},
+                "pull_requests": [],
+                "check_suite": {"head_branch": "main"},
+            },
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        await _handle_check_run_event(data)
+
+        mock_event_bus.publish.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("agent_grid.issue_tracker.webhook_handler.event_bus")
+    async def test_check_run_success_conclusion_dropped(self, mock_event_bus):
+        """check_run with conclusion=success should not publish."""
+        from agent_grid.issue_tracker.webhook_handler import _handle_check_run_event
+
+        mock_event_bus.publish = AsyncMock()
+
+        data = {
+            "action": "completed",
+            "check_run": {
+                "conclusion": "success",
+                "name": "ci-test",
+                "id": 444,
+                "html_url": "https://github.com/owner/repo/runs/444",
+                "head_sha": "ghi789",
+                "output": {},
+                "pull_requests": [
+                    {
+                        "number": 10,
+                        "head": {"ref": "agent/7", "sha": "ghi789"},
+                    }
+                ],
+            },
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        await _handle_check_run_event(data)
+
+        mock_event_bus.publish.assert_not_called()
+
+
+class TestPlanModePrompt:
+    """Tests for plan-mode prompt with native sub-issue linking."""
+
+    def _make_issue(self, author=""):
+        from agent_grid.issue_tracker.public_api import IssueInfo
+
+        return IssueInfo(
+            id="10",
+            number=10,
+            title="Complex task",
+            body="Needs decomposition",
+            labels=[],
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/10",
+            author=author,
+        )
+
+    def test_plan_prompt_includes_sub_issue_api_linking(self):
+        """Plan prompt must instruct the agent to link via the sub_issues API."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="plan")
+        assert "sub_issues" in prompt
+
+    def test_plan_prompt_includes_blocked_by_format(self):
+        """Plan prompt must document the 'Blocked by:' format for dependency resolver."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="plan")
+        assert "Blocked by:" in prompt
+
+    def test_plan_prompt_includes_author_when_present(self):
+        """Plan prompt includes parent issue author when available."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author="alice"), "owner/repo", mode="plan")
+        assert "@alice" in prompt
+
+    def test_plan_prompt_no_author_when_empty(self):
+        """Plan prompt omits author line when author is empty."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author=""), "owner/repo", mode="plan")
+        assert "Parent issue author:" not in prompt
+
+    def test_plan_prompt_includes_two_step_creation(self):
+        """Plan prompt must show the two-step create-then-link process."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="plan")
+        # Step A: capture issue number
+        assert "--json number --jq .number" in prompt
+        # Step B: API link call
+        assert "gh api --method POST" in prompt
+        assert "repos/owner/repo/issues/10/sub_issues" in prompt
+
+    def test_plan_prompt_includes_assignee_step(self):
+        """Plan prompt must instruct the agent to assign sub-issues."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author="bob"), "owner/repo", mode="plan")
+        assert "--add-assignee bob" in prompt
+
+    def test_plan_prompt_blocked_by_first_line_instruction(self):
+        """Plan prompt must instruct that Blocked by: is the FIRST LINE of the body."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="plan")
+        assert "first line" in prompt.lower() or "FIRST LINE" in prompt
+
+    def test_plan_prompt_does_not_break_other_modes(self):
+        """Other mode prompts must remain unaffected by plan-mode changes."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        issue = self._make_issue(author="alice")
+
+        implement = build_prompt(issue, "owner/repo", mode="implement")
+        assert "git checkout -b agent/10" in implement
+        assert "sub_issues" not in implement
+
+        review = build_prompt(
+            issue,
+            "owner/repo",
+            mode="address_review",
+            context={"pr_number": 5, "review_comments": "fix typo"},
+        )
+        assert "addressing review feedback" in review.lower()
+        assert "sub_issues" not in review
+
+        fix_ci = build_prompt(
+            issue,
+            "owner/repo",
+            mode="fix_ci",
+            context={"pr_number": 5, "check_name": "tests", "check_output": "fail"},
+        )
+        assert "CI check" in fix_ci
+        assert "sub_issues" not in fix_ci
+
+        retry = build_prompt(
+            issue,
+            "owner/repo",
+            mode="retry_with_feedback",
+            context={"closed_pr_number": 3, "human_feedback": "wrong approach"},
+        )
+        assert "previous attempt" in retry.lower()
+        assert "sub_issues" not in retry
+
+
+class TestPRCreationPrompt:
+    """Tests for PR creation prompt using proper GitHub fields."""
+
+    def _make_issue(self, author=""):
+        from agent_grid.issue_tracker.public_api import IssueInfo
+
+        return IssueInfo(
+            id="42",
+            number=42,
+            title="Fix bug",
+            body="The app crashes",
+            labels=[],
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/42",
+            author=author,
+        )
+
+    def test_implement_prompt_includes_reviewer_flag(self):
+        """gh pr create should include --reviewer when author is present."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author="alice"), "owner/repo", mode="implement")
+        assert "--reviewer alice" in prompt
+
+    def test_implement_prompt_no_reviewer_when_no_author(self):
+        """gh pr create should omit --reviewer when author is empty."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author=""), "owner/repo", mode="implement")
+        assert "--reviewer" not in prompt
+
+    def test_implement_prompt_includes_label_flag(self):
+        """gh pr create should include --label for status tracking."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(), "owner/repo", mode="implement")
+        assert '--label "ag/in-progress"' in prompt
+
+    def test_retry_prompt_includes_reviewer_flag(self):
+        """Retry mode gh pr create should also include --reviewer."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(
+            self._make_issue(author="bob"),
+            "owner/repo",
+            mode="retry_with_feedback",
+            context={"closed_pr_number": 3, "human_feedback": "wrong"},
+        )
+        assert "--reviewer bob" in prompt
+
+    def test_retry_prompt_includes_label_flag(self):
+        """Retry mode gh pr create should include --label."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(
+            self._make_issue(),
+            "owner/repo",
+            mode="retry_with_feedback",
+            context={"closed_pr_number": 3, "human_feedback": "wrong"},
+        )
+        assert '--label "ag/in-progress"' in prompt
+
+    def test_no_cc_author_in_body(self):
+        """PR body should not contain 'cc @author' — use --reviewer instead."""
+        from agent_grid.coordinator.prompt_builder import build_prompt
+
+        prompt = build_prompt(self._make_issue(author="alice"), "owner/repo", mode="implement")
+        assert "cc @alice" not in prompt
+
+
+class TestPlannerBlockedBy:
+    """Tests for planner auto-adding Blocked by: to sub-issue body."""
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_added_from_depends_on(self):
+        """Sub-issues with depends_on should have Blocked by: in body."""
+        from agent_grid.coordinator.planner import Planner
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        # Build a fake planner that doesn't call the LLM
+        planner = Planner.__new__(Planner)
+
+        created = []
+        assign_calls = []
+
+        class FakeTracker:
+            async def create_subissue(self, repo, parent_id, title, body, labels=None):
+                issue = IssueInfo(
+                    id=str(100 + len(created)),
+                    number=100 + len(created),
+                    title=title,
+                    body=body,
+                    status=IssueStatus.OPEN,
+                    labels=labels or [],
+                    repo_url=f"https://github.com/{repo}",
+                    html_url=f"https://github.com/{repo}/issues/{100 + len(created)}",
+                )
+                created.append({"issue": issue, "body": body, "labels": labels})
+                return issue
+
+            async def add_comment(self, repo, issue_id, body):
+                pass
+
+            async def assign_issue(self, repo, issue_id, assignee):
+                assign_calls.append((issue_id, assignee))
+
+        class FakeLabels:
+            async def transition_to(self, repo, issue_id, label):
+                pass
+
+        planner._tracker = FakeTracker()
+        planner._labels = FakeLabels()
+        planner._client = None  # Won't be used
+
+        # Simulate what happens after LLM returns a plan
+        import json
+
+        plan = {
+            "plan_summary": "Test plan",
+            "sub_tasks": [
+                {
+                    "title": "Task A",
+                    "description": "First task",
+                    "acceptance_criteria": ["AC1"],
+                    "depends_on": [],
+                    "estimated_files": ["a.py"],
+                },
+                {
+                    "title": "Task B",
+                    "description": "Depends on A",
+                    "acceptance_criteria": ["AC2"],
+                    "depends_on": [0],
+                    "estimated_files": ["b.py"],
+                },
+            ],
+            "risks": [],
+        }
+
+        # Monkey-patch the LLM call to return our plan
+        class FakeResponse:
+            class Content:
+                text = json.dumps(plan)
+
+            content = [Content()]
+
+        class FakeClient:
+            class messages:
+                @staticmethod
+                async def create(**kwargs):
+                    return FakeResponse()
+
+        planner._client = FakeClient()
+
+        from unittest.mock import patch
+
+        with patch("agent_grid.coordinator.planner.embed_metadata", side_effect=lambda text, meta: text):
+            result = await planner.decompose("owner/repo", 1, "Parent", "Body")
+
+        assert len(result) == 2
+
+        # First sub-issue: no Blocked by
+        first_body = created[0]["body"]
+        assert not first_body.startswith("Blocked by:")
+
+        # Second sub-issue: should have Blocked by: #100
+        second_body = created[1]["body"]
+        assert second_body.startswith("Blocked by: #100")
+
+        # Second should have ag/waiting label
+        assert "ag/waiting" in created[1]["labels"]

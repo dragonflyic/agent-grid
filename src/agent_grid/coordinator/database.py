@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ..config import settings
 from ..execution_grid import AgentExecution, ExecutionStatus
 from .models import (
+    AgentEventModel,
     BudgetUsageModel,
     CronStateModel,
     ExecutionModel,
     IssueStateModel,
     NudgeModel,
+    PipelineEventModel,
 )
 from .public_api import NudgeRequest
 
@@ -457,6 +459,226 @@ class Database:
         async with self._session() as session:
             await session.execute(
                 update(ExecutionModel).where(ExecutionModel.id == execution_id).values(external_run_id=external_run_id)
+            )
+            await session.commit()
+
+    # -------------------------------------------------------------------------
+    # Pipeline events (audit trail)
+    # -------------------------------------------------------------------------
+
+    async def record_pipeline_event(
+        self,
+        issue_number: int,
+        repo: str,
+        event_type: str,
+        stage: str,
+        detail: dict | None = None,
+    ) -> None:
+        """Append a pipeline event to the audit trail."""
+        async with self._session() as session:
+            session.add(
+                PipelineEventModel(
+                    issue_number=issue_number,
+                    repo=repo,
+                    event_type=event_type,
+                    stage=stage,
+                    detail=detail,
+                )
+            )
+            await session.commit()
+
+    async def get_pipeline_events(
+        self,
+        repo: str,
+        issue_number: int | None = None,
+        event_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Query pipeline events with optional filters."""
+        async with self._session() as session:
+            stmt = select(PipelineEventModel).where(PipelineEventModel.repo == repo)
+            if issue_number is not None:
+                stmt = stmt.where(PipelineEventModel.issue_number == issue_number)
+            if event_type is not None:
+                stmt = stmt.where(PipelineEventModel.event_type == event_type)
+            stmt = stmt.order_by(PipelineEventModel.created_at.desc()).limit(limit).offset(offset)
+            result = await session.execute(stmt)
+            return [
+                {
+                    "id": str(m.id),
+                    "issue_number": m.issue_number,
+                    "repo": m.repo,
+                    "event_type": m.event_type,
+                    "stage": m.stage,
+                    "detail": m.detail,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in result.scalars().all()
+            ]
+
+    async def get_pipeline_stats(self, repo: str) -> dict:
+        """Get aggregate pipeline statistics for the dashboard."""
+        async with self._session() as session:
+            # Classifications
+            class_stmt = (
+                select(IssueStateModel.classification, func.count().label("count"))
+                .where(IssueStateModel.repo == repo)
+                .group_by(IssueStateModel.classification)
+            )
+            class_result = await session.execute(class_stmt)
+            classifications = {row.classification or "unclassified": row.count for row in class_result.all()}
+
+            # Executions by status (filtered by repo)
+            exec_stmt = (
+                select(ExecutionModel.status, func.count().label("count"))
+                .where(ExecutionModel.repo_url.contains(repo))
+                .group_by(ExecutionModel.status)
+            )
+            exec_result = await session.execute(exec_stmt)
+            execution_counts = {row.status: row.count for row in exec_result.all()}
+
+            # Total tracked
+            total_result = await session.execute(
+                select(func.count()).select_from(IssueStateModel).where(IssueStateModel.repo == repo)
+            )
+
+            return {
+                "classifications": classifications,
+                "execution_counts": execution_counts,
+                "total_tracked_issues": total_result.scalar() or 0,
+            }
+
+    async def list_all_issue_states(
+        self,
+        repo: str,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List all issue states for the dashboard (paginated)."""
+        async with self._session() as session:
+            stmt = (
+                select(IssueStateModel)
+                .where(IssueStateModel.repo == repo)
+                .order_by(IssueStateModel.updated_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.execute(stmt)
+            return [
+                {
+                    "issue_number": m.issue_number,
+                    "repo": m.repo,
+                    "classification": m.classification,
+                    "parent_issue": m.parent_issue,
+                    "sub_issues": m.sub_issues,
+                    "retry_count": m.retry_count,
+                    "metadata": m.metadata_,
+                    "last_checked_at": m.last_checked_at.isoformat() if m.last_checked_at else None,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                    "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+                }
+                for m in result.scalars().all()
+            ]
+
+    # -------------------------------------------------------------------------
+    # Agent events (execution-level audit trail)
+    # -------------------------------------------------------------------------
+
+    async def record_agent_event(
+        self,
+        execution_id: UUID,
+        message_type: str,
+        content: str | None = None,
+        tool_name: str | None = None,
+        tool_id: str | None = None,
+    ) -> None:
+        """Append an agent chat/tool event to the audit log."""
+        async with self._session() as session:
+            session.add(
+                AgentEventModel(
+                    execution_id=execution_id,
+                    message_type=message_type,
+                    content=content,
+                    tool_name=tool_name,
+                    tool_id=tool_id,
+                )
+            )
+            await session.commit()
+
+    async def get_agent_events(
+        self,
+        execution_id: UUID,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Get agent events for an execution, oldest first."""
+        async with self._session() as session:
+            result = await session.execute(
+                select(AgentEventModel)
+                .where(AgentEventModel.execution_id == execution_id)
+                .order_by(AgentEventModel.created_at.asc())
+                .limit(limit)
+                .offset(offset)
+            )
+            return [
+                {
+                    "id": str(m.id),
+                    "execution_id": str(m.execution_id),
+                    "message_type": m.message_type,
+                    "content": m.content,
+                    "tool_name": m.tool_name,
+                    "tool_id": m.tool_id,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in result.scalars().all()
+            ]
+
+    async def list_executions_for_dashboard(
+        self,
+        issue_id: str,
+        limit: int = 20,
+    ) -> list[dict]:
+        """List executions with all fields for dashboard display."""
+        async with self._session() as session:
+            result = await session.execute(
+                select(ExecutionModel)
+                .where(ExecutionModel.issue_id == issue_id)
+                .order_by(ExecutionModel.created_at.desc())
+                .limit(limit)
+            )
+            return [
+                {
+                    "id": str(m.id),
+                    "status": m.status,
+                    "mode": m.mode,
+                    "prompt": m.prompt,
+                    "result": m.result,
+                    "pr_number": m.pr_number,
+                    "branch": m.branch,
+                    "external_run_id": m.external_run_id,
+                    "session_link": m.session_link,
+                    "cost_cents": m.cost_cents,
+                    "started_at": m.started_at.isoformat() if m.started_at else None,
+                    "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in result.scalars().all()
+            ]
+
+    async def set_session_link(self, execution_id: UUID, session_link: str) -> None:
+        """Store the Oz session link for an execution."""
+        async with self._session() as session:
+            await session.execute(
+                update(ExecutionModel).where(ExecutionModel.id == execution_id).values(session_link=session_link)
+            )
+            await session.commit()
+
+    async def set_cost(self, execution_id: UUID, cost_cents: int) -> None:
+        """Store the execution cost in cents."""
+        async with self._session() as session:
+            await session.execute(
+                update(ExecutionModel).where(ExecutionModel.id == execution_id).values(cost_cents=cost_cents)
             )
             await session.commit()
 

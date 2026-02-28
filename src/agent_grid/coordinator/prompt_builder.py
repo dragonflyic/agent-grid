@@ -21,8 +21,8 @@ def build_prompt(
     context = context or {}
     branch_name = f"agent/{issue.number}"
 
-    # Owner tag for PR body
-    owner_tag = f"\\n\\ncc @{issue.author} for review" if issue.author else ""
+    # PR flags for reviewer and label
+    reviewer_flag = f" --reviewer {issue.author}" if issue.author else ""
 
     # Format clarification thread if present
     clarification = ""
@@ -59,8 +59,8 @@ Issue #{issue.number}: {issue.title}
      `/ship` with a commit message, PR title, and body that references "Closes #{issue.number}"
    - Otherwise, manually:
      - Push your branch
-     - Create a PR using: gh pr create --title "..." --body "Closes #{issue.number}{owner_tag}\\n\\n..."
-     - Link PR to issue: gh pr edit --add-issue #{issue.number}
+     - Create PR with proper fields set:
+       gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/in-progress"{reviewer_flag}
    - **EXIT immediately after the PR is created.** Do not continue working.
      Your job is done once the PR exists. CI will run automatically.
 
@@ -71,10 +71,22 @@ Follow any auto-triggered skills (user-invocable: false) — they define the rep
 """
 
     if mode == "plan":
+        parent_author_line = f"\n- Parent issue author: @{issue.author}" if issue.author else ""
+        assign_step = (
+            (
+                f"\n**Step C** — Assign the sub-issue to the parent issue author:\n"
+                f"```bash\n"
+                f"gh issue edit $NEW_ISSUE --repo {repo} --add-assignee {issue.author}\n"
+                f"```\n"
+            )
+            if issue.author
+            else ""
+        )
+
         return f"""You are a senior tech lead planning work decomposition for a complex GitHub issue.
 
 ## Repository
-- Repo: {repo}
+- Repo: {repo}{parent_author_line}
 
 ## Parent Issue #{issue.number}: {issue.title}
 
@@ -100,34 +112,68 @@ Before creating sub-issues, design the solution:
 - Note any design trade-offs and your rationale
 
 ### Step 3: Create Detailed Sub-Issues
-For each sub-task, create a GitHub sub-issue:
+For each sub-task, create a GitHub sub-issue using this two-step process.
+
+**Step A** — Create the issue and capture its number:
 ```bash
-gh issue create --repo {repo} --title "[Sub #{issue.number}] <title>" --body "<body>" --label "ag/sub-issue"
+NEW_ISSUE=$(gh issue create --repo {repo} \\
+  --title "[Sub #{issue.number}] <title>" \\
+  --body "<body>" \\
+  --label "ag/sub-issue" \\
+  --json number --jq .number)
 ```
+
+**Step B** — Link it as a native GitHub sub-issue of the parent:
+```bash
+gh api --method POST \\
+  repos/{repo}/issues/{issue.number}/sub_issues \\
+  --field sub_issue_id=$(gh issue view $NEW_ISSUE --repo {repo} --json id --jq .id)
+```
+
+GitHub's UI and the dependency resolver only recognise sub-issues that are
+linked via the sub-issues API, so step B is required. Without it the sub-issue
+will not appear under the parent and the system cannot track completion.
+
+{assign_step}
 
 **Each sub-issue body MUST include all of the following:**
 
-1. **Context**: "Part of #{issue.number}" on the first line
-2. **Objective**: A clear one-paragraph description of what this sub-task accomplishes
-3. **Implementation Details**:
+1. **Objective**: A clear one-paragraph description of what this sub-task accomplishes
+2. **Implementation Details**:
    - Exact files to create or modify (full paths)
    - For each file: what functions/methods/classes to add or change
    - Key logic and algorithms to implement (pseudocode or description)
    - Data structures and types involved
    - How this integrates with the rest of the codebase
-4. **Testing Requirements**:
+3. **Testing Requirements**:
    - Specific test cases to write
    - Edge cases to cover
    - Which test file to add tests to
-5. **Acceptance Criteria**: A checklist of concrete, verifiable items
-6. **Dependencies**: List any sub-tasks that must complete first (by title)
+4. **Acceptance Criteria**: A checklist of concrete, verifiable items
 
-If a sub-task depends on another, add the label "ag/waiting" and note the dependency:
-```bash
-gh issue create --repo {repo} \\
-  --title "[Sub #{issue.number}] <title>" --body "<body>" \\
-  --label "ag/sub-issue" --label "ag/waiting"
+**Dependencies between sub-issues**: If a sub-task depends on other sub-issues,
+the FIRST LINE of the issue body must be in this exact format:
+
 ```
+Blocked by: #N1, #N2
+```
+
+This is the machine-parseable format that the dependency resolver uses. It must
+be the very first line of the body, before any other text. Also add the
+"ag/waiting" label so the system knows not to start the sub-issue until its
+blockers are resolved:
+
+```bash
+NEW_ISSUE=$(gh issue create --repo {repo} \\
+  --title "[Sub #{issue.number}] <title>" \\
+  --body "Blocked by: #<blocker1>, #<blocker2>
+
+<rest of body>" \\
+  --label "ag/sub-issue" --label "ag/waiting" \\
+  --json number --jq .number)
+```
+
+Then link and assign as usual (steps B and C above).
 
 ### Step 4: Post Plan Summary
 After creating all sub-issues, post a detailed summary comment on the parent issue:
@@ -245,10 +291,10 @@ Take a DIFFERENT approach based on the feedback. Start fresh:
 git checkout -b {new_branch}
 ```
 
-After implementation, push and create a PR:
+After implementation, push and create a PR with proper fields:
 ```bash
 git push -u origin {new_branch}
-gh pr create --title "..." --body "Closes #{issue.number}{owner_tag}\\n\\n..."
+gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/in-progress"{reviewer_flag}
 ```
 
 **EXIT immediately after the PR is created.** Your job is done. CI will run automatically.
@@ -266,7 +312,7 @@ gh pr create --title "..." --body "Closes #{issue.number}{owner_tag}\\n\\n..."
         prompt = (
             base
             + f"""
-## IMPORTANT: CI check "{check_name}" failed on your PR #{pr_number}
+## IMPORTANT: CI check "{check_name}" failed on {f"PR #{pr_number}" if pr_number else f"branch {existing_branch}"}
 
 Previous work is on branch: {existing_branch}
 Checkout that branch (don't create a new one):
@@ -294,7 +340,7 @@ Output:
 git push origin {existing_branch}
 ```
 
-Do NOT create a new PR. Your commits will be added to the existing PR #{pr_number}.
+Do NOT create a new PR. Commits go to the existing {f"PR #{pr_number}" if pr_number else "pull request"}.
 Do NOT force push or squash.
 
 **EXIT immediately after pushing.** Your job is done. CI will re-run automatically.

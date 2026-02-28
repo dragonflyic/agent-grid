@@ -1,17 +1,21 @@
 """The Tech Lead's main cron loop.
 
-Runs every N seconds (default 1 hour). Each cycle performs 7 phases:
+Runs every N seconds (default 1 hour). Each cycle performs 9 phases:
 1. Scan — fetch unprocessed open issues
 2. Classify — SIMPLE/COMPLEX/BLOCKED/SKIP
 3. Act — spawn agents, create sub-issues, post questions
 4. Monitor in-progress — check agent statuses
 5. Monitor PRs — detect human review comments
 6. Monitor closed PRs — detect feedback on closed PRs
-7. Resolve blockers — unblock issues with human responses
+7. Poll CI failures — backup to webhook delivery
+8. Resolve blockers — unblock issues with human responses
+9. Proactive scan — find unlabeled issues suitable for automation
 """
 
 import asyncio
+import json
 import logging
+import re
 from uuid import uuid4
 
 from ..config import settings
@@ -67,7 +71,7 @@ class ManagementLoop:
             await asyncio.sleep(self._interval)
 
     async def run_cycle(self) -> None:
-        """Run one full cycle of all 7 phases."""
+        """Run one full cycle of all 9 phases."""
         repo = settings.target_repo
         if not repo:
             logger.warning("No target_repo configured, skipping cycle")
@@ -89,6 +93,7 @@ class ManagementLoop:
             can_launch, reason = await budget.can_launch_agent()
             if not can_launch:
                 logger.info(f"Budget limit reached: {reason}. Stopping new assignments.")
+                await self._db.record_pipeline_event(issue.number, repo, "budget_blocked", "launch", {"reason": reason})
                 break
 
             classification = await classifier.classify(issue)
@@ -98,6 +103,17 @@ class ManagementLoop:
                 issue_number=issue.number,
                 repo=repo,
                 classification=classification.category,
+            )
+            await self._db.record_pipeline_event(
+                issue.number,
+                repo,
+                "classified",
+                "classify",
+                {
+                    "category": classification.category,
+                    "reason": classification.reason,
+                    "estimated_complexity": classification.estimated_complexity,
+                },
             )
 
             if classification.category == "SKIP":
@@ -150,20 +166,62 @@ class ManagementLoop:
             if pr_info["issue_id"]:
                 await self._launch_retry(repo, pr_info)
 
-        # Phase 7: Resolve blockers — launch agents directly for unblocked issues
+        # Phase 7: Poll for CI failures (backup to webhook delivery)
+        from .ci_monitor import get_ci_monitor
+
+        ci_monitor = get_ci_monitor()
+        ci_failures = await ci_monitor.check_ci_failures(repo)
+        ci_launched = 0
+        for check_info in ci_failures:
+            issue_match = re.match(r"agent/(\d+)(?:-|$)", check_info.get("branch", ""))
+            if not issue_match:
+                continue
+            ci_issue_id = issue_match.group(1)
+
+            # Enforce retry limit (same as webhook path)
+            ci_state = await self._db.get_issue_state(int(ci_issue_id), repo)
+            ci_meta = (ci_state or {}).get("metadata") or {}
+            if isinstance(ci_meta, str):
+                ci_meta = json.loads(ci_meta)
+            ci_fix_count = ci_meta.get("ci_fix_count", 0)
+            if ci_fix_count >= settings.max_ci_fix_retries:
+                logger.warning(
+                    f"Issue #{ci_issue_id}: CI fix retry limit ({settings.max_ci_fix_retries}) reached via polling"
+                )
+                continue
+
+            check_info = await self._enrich_check_output(repo, check_info)
+            launched = await self._launch_ci_fix(repo, check_info)
+            if launched:
+                # Update dedup cursor + fix count (mirrors webhook path)
+                updated_meta = {
+                    **ci_meta,
+                    "last_ci_check_sha": check_info.get("head_sha", ""),
+                    "ci_fix_count": ci_fix_count + 1,
+                }
+                await self._db.upsert_issue_state(
+                    issue_number=int(ci_issue_id),
+                    repo=repo,
+                    metadata=updated_meta,
+                )
+                ci_launched += 1
+        if ci_launched:
+            logger.info(f"Phase 7: Launched {ci_launched} CI fix agents")
+
+        # Phase 8: Resolve blockers — launch agents directly for unblocked issues
         blocker_resolver = get_blocker_resolver()
         unblocked = await blocker_resolver.check_blocked_issues(repo)
         for issue in unblocked:
             await self._launch_unblocked(repo, issue)
         if unblocked:
-            logger.info(f"Phase 7: Launched {len(unblocked)} unblocked issues")
+            logger.info(f"Phase 8: Launched {len(unblocked)} unblocked issues")
 
         # Bonus: Check dependency resolution
         dep_resolver = get_dependency_resolver()
         await dep_resolver.check_dependencies(repo)
         await dep_resolver.check_parent_completion(repo)
 
-        # Phase 8: Proactive scan (runs every N cycles)
+        # Phase 9: Proactive scan (runs every N cycles)
         if settings.proactive_scan_enabled:
             await self._maybe_run_proactive_scan(repo)
 
@@ -198,6 +256,14 @@ class ManagementLoop:
         claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
         if not claimed:
             logger.info(f"Issue #{issue_id}: already has active execution, skipping")
+            repo = repo_url.replace("https://github.com/", "").replace(".git", "")
+            await self._db.record_pipeline_event(
+                int(issue_id) if issue_id.isdigit() else 0,
+                repo,
+                "launch_failed",
+                "launch",
+                {"reason": "duplicate_execution"},
+            )
             return False
 
         config = ExecutionConfig(repo_url=repo_url, prompt=prompt)
@@ -220,8 +286,25 @@ class ManagementLoop:
             execution.status = ExecutionStatus.FAILED
             execution.result = f"Launch failed: {e}"
             await self._db.update_execution(execution)
+            repo = repo_url.replace("https://github.com/", "").replace(".git", "")
+            await self._db.record_pipeline_event(
+                int(issue_id) if issue_id.isdigit() else 0,
+                repo,
+                "launch_failed",
+                "launch",
+                {"reason": str(e)},
+            )
             return False
 
+        # Record successful launch
+        repo = repo_url.replace("https://github.com/", "").replace(".git", "")
+        await self._db.record_pipeline_event(
+            int(issue_id) if issue_id.isdigit() else 0,
+            repo,
+            "launched",
+            "launch",
+            {"mode": mode, "execution_id": str(execution_id)},
+        )
         return True
 
     async def _has_active_execution(self, issue_id: str) -> bool:
@@ -387,13 +470,27 @@ class ManagementLoop:
             )
             logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent")
 
+    async def _enrich_check_output(self, repo: str, check_info: dict) -> dict:
+        """If check_output is empty, fetch actual CI logs via job ID."""
+        if check_info.get("check_output") or not check_info.get("job_id"):
+            return check_info
+        try:
+            from ..issue_tracker.github_client import GitHubClient
+
+            tracker = get_issue_tracker()
+            if isinstance(tracker, GitHubClient):
+                logs = await tracker.get_actions_job_logs(repo, check_info["job_id"])
+                if logs:
+                    return {**check_info, "check_output": logs}
+        except Exception as e:
+            logger.warning(f"Failed to fetch CI logs for job {check_info.get('job_id')}: {e}")
+        return check_info
+
     async def _launch_ci_fix(self, repo: str, check_info: dict) -> bool:
         """Launch an agent to fix a failing CI check on an agent PR.
 
         Returns True if agent was launched, False otherwise.
         """
-        import re
-
         branch = check_info.get("branch", "")
         match = re.match(r"agent/(\d+)(?:-|$)", branch)
         if not match:
@@ -489,6 +586,13 @@ class ManagementLoop:
                 f"Issue #{issue.number}: quality gate blocked "
                 f"(score={assessment.score}/10, flags={assessment.risk_flags})"
             )
+            await self._db.record_pipeline_event(
+                issue.number,
+                repo,
+                "quality_gate",
+                "quality_gate",
+                {"score": assessment.score, "verdict": "blocked", "risk_flags": assessment.risk_flags},
+            )
             return "blocked"
 
         if not quality_gate.should_proceed(assessment, is_proactive):
@@ -500,8 +604,27 @@ class ManagementLoop:
                     f"Skipping: confidence too low ({assessment.score}/10). {assessment.explanation}",
                 )
             logger.info(f"Issue #{issue.number}: quality gate skipped (score={assessment.score}/10)")
+            await self._db.record_pipeline_event(
+                issue.number,
+                repo,
+                "quality_gate",
+                "quality_gate",
+                {"score": assessment.score, "verdict": "skipped", "is_proactive": is_proactive},
+            )
             return "skipped"
 
+        await self._db.record_pipeline_event(
+            issue.number,
+            repo,
+            "quality_gate",
+            "quality_gate",
+            {
+                "score": assessment.score,
+                "verdict": "proceed",
+                "risk_flags": assessment.risk_flags,
+                "green_flags": assessment.green_flags,
+            },
+        )
         return "proceed"
 
     async def _maybe_run_proactive_scan(self, repo: str) -> None:
@@ -529,7 +652,7 @@ class ManagementLoop:
             },
         )
 
-        logger.info("Phase 8: Running proactive scan")
+        logger.info("Phase 9: Running proactive scan")
 
         proactive_scanner = get_proactive_scanner()
         classifier = get_classifier()
@@ -620,7 +743,7 @@ class ManagementLoop:
 
             picked_up += 1
 
-        logger.info(f"Phase 8: Proactive scan complete — picked up {picked_up} issues")
+        logger.info(f"Phase 9: Proactive scan complete — picked up {picked_up} issues")
 
     async def _check_in_progress(self, repo: str) -> None:
         """Phase 4: Check in-progress executions for timeouts."""

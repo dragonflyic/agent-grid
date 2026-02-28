@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Grid Dashboard</title>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #bc8cff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.header { display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.header h1 { font-size: 18px; font-weight: 600; }
+.header .meta { color: var(--muted); font-size: 12px; }
+.health { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--green); margin-right: 6px; }
+
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 24px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.card h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 12px; }
+
+.full-width { grid-column: 1 / -1; }
+
+/* Funnel */
+.funnel { display: flex; gap: 8px; flex-wrap: wrap; }
+.funnel-item { flex: 1; min-width: 100px; text-align: center; padding: 12px 8px;
+  border-radius: 6px; background: var(--bg); }
+.funnel-item .num { font-size: 24px; font-weight: 700; }
+.funnel-item .label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.funnel-item.highlight { border: 1px solid var(--accent); }
+
+/* Budget bar */
+.budget-bar { height: 24px; background: var(--bg); border-radius: 4px; overflow: hidden;
+  margin-top: 8px; }
+.budget-fill { height: 100%; background: var(--accent); transition: width 0.3s; border-radius: 4px; }
+.budget-text { margin-top: 4px; font-size: 12px; color: var(--muted); }
+
+/* Table */
+.controls { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+select, button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-size: 13px; cursor: pointer; }
+button { background: var(--accent); color: #fff; border: none; font-weight: 600; }
+button:hover { opacity: 0.9; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 8px; border-bottom: 2px solid var(--border);
+  color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+td { padding: 8px; border-bottom: 1px solid var(--border); }
+tr:hover td { background: rgba(88,166,255,0.04); }
+.stage-badge { display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 600; }
+.stage-unlabeled { background: #30363d; color: var(--muted); }
+.stage-todo { background: #1f3a5f; color: var(--accent); }
+.stage-in-progress { background: #2a1f0b; color: var(--yellow); }
+.stage-planning { background: #2a1f0b; color: var(--yellow); }
+.stage-review-pending { background: #1a2b1a; color: var(--green); }
+.stage-blocked { background: #3b1d1d; color: var(--red); }
+.stage-failed { background: #3b1d1d; color: var(--red); }
+.stage-done { background: #1a2b1a; color: var(--green); }
+.stage-skipped { background: #30363d; color: var(--muted); }
+.stage-epic { background: #2d1f3d; color: var(--purple); }
+.stage-sub-issue { background: #1f3a5f; color: var(--accent); }
+.stage-waiting { background: #2a1f0b; color: var(--yellow); }
+.stage-proactive { background: #1a2b1a; color: var(--green); }
+.stage-labeled-other { background: #30363d; color: var(--muted); }
+
+/* Activity */
+.activity-list { max-height: 400px; overflow-y: auto; }
+.event { padding: 8px 0; border-bottom: 1px solid var(--border); display: flex;
+  gap: 12px; font-size: 13px; }
+.event-time { color: var(--muted); font-family: monospace; font-size: 12px; white-space: nowrap; }
+.event-type { font-weight: 600; min-width: 120px; }
+.event-detail { color: var(--muted); flex: 1; }
+
+/* Detail modal */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  z-index: 100; justify-content: center; align-items: flex-start; padding: 40px; }
+.modal-overlay.active { display: flex; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  width: 100%; max-width: 800px; max-height: 80vh; overflow-y: auto; padding: 24px; }
+.modal h2 { margin-bottom: 16px; }
+.modal .close { float: right; cursor: pointer; color: var(--muted); font-size: 20px; }
+.timeline-item { padding: 8px 0; border-left: 2px solid var(--border); padding-left: 16px;
+  margin-left: 8px; }
+.timeline-item .time { font-size: 11px; color: var(--muted); font-family: monospace; }
+.timeline-item .type { font-weight: 600; }
+.timeline-item .detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+.loading { color: var(--muted); padding: 20px; text-align: center; }
+.error { color: var(--red); padding: 10px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span class="health" id="health-dot"></span>Agent Grid Dashboard</h1>
+  <div class="meta">
+    <span id="repo-name">loading...</span> &middot;
+    Last refresh: <span id="last-refresh">—</span>
+    <button onclick="refresh()" style="margin-left: 12px; padding: 4px 10px;">Refresh</button>
+  </div>
+</div>
+
+<div class="grid">
+  <!-- Pipeline funnel -->
+  <div class="card full-width">
+    <h2>Pipeline Funnel</h2>
+    <div class="funnel" id="funnel">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Budget -->
+  <div class="card">
+    <h2>Budget</h2>
+    <div id="budget-content"><div class="loading">Loading...</div></div>
+  </div>
+
+  <!-- Stats -->
+  <div class="card">
+    <h2>Classifications</h2>
+    <div id="class-content"><div class="loading">Loading...</div></div>
+  </div>
+
+  <!-- Issues table -->
+  <div class="card full-width">
+    <h2>Issues</h2>
+    <div class="controls">
+      <select id="stage-filter" onchange="loadIssues()">
+        <option value="">All stages</option>
+        <option value="unlabeled">Unlabeled</option>
+        <option value="todo">Todo</option>
+        <option value="in-progress">In Progress</option>
+        <option value="planning">Planning</option>
+        <option value="review-pending">Review Pending</option>
+        <option value="blocked">Blocked</option>
+        <option value="failed">Failed</option>
+        <option value="skipped">Skipped</option>
+        <option value="done">Done</option>
+        <option value="epic">Epic</option>
+        <option value="sub-issue">Sub-Issue</option>
+      </select>
+      <button id="activate-btn" onclick="activateSelected()" disabled>Activate Selected</button>
+      <button onclick="triggerScan()">Trigger Scan</button>
+    </div>
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="select-all" onchange="toggleSelectAll()"></th>
+            <th>#</th>
+            <th>Title</th>
+            <th>Stage</th>
+            <th>Classification</th>
+            <th>Confidence</th>
+            <th>Retries</th>
+          </tr>
+        </thead>
+        <tbody id="issues-body">
+          <tr><td colspan="7" class="loading">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="issues-pagination" style="margin-top: 8px; font-size: 12px; color: var(--muted);"></div>
+  </div>
+
+  <!-- Activity feed -->
+  <div class="card full-width">
+    <h2>Recent Activity</h2>
+    <div class="controls">
+      <select id="event-filter" onchange="loadActivity()">
+        <option value="">All events</option>
+        <option value="classified">Classified</option>
+        <option value="quality_gate">Quality Gate</option>
+        <option value="launched">Launched</option>
+        <option value="launch_failed">Launch Failed</option>
+        <option value="budget_blocked">Budget Blocked</option>
+        <option value="manual_activate">Manual Activate</option>
+        <option value="manual_classify">Manual Classify</option>
+      </select>
+    </div>
+    <div class="activity-list" id="activity-list">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail modal -->
+<div class="modal-overlay" id="detail-modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <div id="modal-content"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<script>
+const API = '/api/dashboard';
+let selectedIssues = new Set();
+let currentIssues = [];
+
+async function fetchJSON(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+  return resp.json();
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadOverview() {
+  try {
+    const data = await fetchJSON(`${API}/overview`);
+    document.getElementById('repo-name').textContent = data.repo || '—';
+
+    // Funnel
+    const labels = data.issues_by_label || {};
+    const inProgress = (labels['ag/in-progress'] || 0) + (labels['ag/planning'] || 0);
+    const review = labels['ag/review-pending'] || 0;
+    const done = labels['ag/done'] || 0;
+    const blocked = (labels['ag/blocked'] || 0) + (labels['ag/waiting'] || 0);
+    const failed = labels['ag/failed'] || 0;
+
+    document.getElementById('funnel').innerHTML = [
+      { num: data.total_open_issues, label: 'Total Open' },
+      { num: data.unlabeled_issues, label: 'Unlabeled' },
+      { num: data.labeled_issues, label: 'Labeled' },
+      { num: inProgress, label: 'In Progress' },
+      { num: review, label: 'In Review' },
+      { num: blocked, label: 'Blocked' },
+      { num: done, label: 'Done' },
+      { num: failed, label: 'Failed' },
+    ].map(i => `<div class="funnel-item${i.num > 0 ? ' highlight' : ''}">
+      <div class="num">${i.num}</div><div class="label">${i.label}</div></div>`).join('');
+
+    // Budget
+    const b = data.budget || {};
+    const pct = b.max_concurrent ? Math.round((b.concurrent_executions / b.max_concurrent) * 100) : 0;
+    document.getElementById('budget-content').innerHTML = `
+      <div><strong>${b.concurrent_executions || 0}</strong> / ${b.max_concurrent || '?'} concurrent executions</div>
+      <div class="budget-bar"><div class="budget-fill" style="width:${pct}%"></div></div>
+      <div class="budget-text">Tokens used: ${(b.tokens_used || 0).toLocaleString()}</div>`;
+
+    // Classifications
+    const cl = data.classifications || {};
+    document.getElementById('class-content').innerHTML = Object.entries(cl).length
+      ? Object.entries(cl).map(([k, v]) => `<div>${k}: <strong>${v}</strong></div>`).join('')
+      : '<div class="loading">No classified issues yet</div>';
+  } catch (e) {
+    document.getElementById('funnel').innerHTML = `<div class="error">${e.message}</div>`;
+  }
+}
+
+async function loadIssues() {
+  const stage = document.getElementById('stage-filter').value;
+  const params = new URLSearchParams({ limit: '200' });
+  if (stage) params.set('stage', stage);
+
+  try {
+    currentIssues = await fetchJSON(`${API}/issues?${params}`);
+    selectedIssues.clear();
+    updateActivateBtn();
+
+    const tbody = document.getElementById('issues-body');
+    if (!currentIssues.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="loading">No issues found</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = currentIssues.map(i => `
+      <tr>
+        <td><input type="checkbox" data-num="${i.issue_number}" onchange="toggleSelect(${i.issue_number}, this.checked)"></td>
+        <td><a href="#" onclick="showDetail(${i.issue_number}); return false;">#${i.issue_number}</a></td>
+        <td>${esc(i.title || '')}</td>
+        <td><span class="stage-badge stage-${i.pipeline_stage}">${i.pipeline_stage}</span></td>
+        <td>${i.classification || '—'}</td>
+        <td>${i.confidence_score != null ? i.confidence_score + '/10' : '—'}</td>
+        <td>${i.retry_count || 0}</td>
+      </tr>`).join('');
+
+    document.getElementById('issues-pagination').textContent =
+      `Showing ${currentIssues.length} issues`;
+  } catch (e) {
+    document.getElementById('issues-body').innerHTML =
+      `<tr><td colspan="7" class="error">${e.message}</td></tr>`;
+  }
+}
+
+function toggleSelect(num, checked) {
+  if (checked) selectedIssues.add(num); else selectedIssues.delete(num);
+  updateActivateBtn();
+}
+
+function toggleSelectAll() {
+  const checked = document.getElementById('select-all').checked;
+  document.querySelectorAll('#issues-body input[type=checkbox]').forEach(cb => {
+    cb.checked = checked;
+    const num = parseInt(cb.dataset.num);
+    if (checked) selectedIssues.add(num); else selectedIssues.delete(num);
+  });
+  updateActivateBtn();
+}
+
+function updateActivateBtn() {
+  const btn = document.getElementById('activate-btn');
+  btn.disabled = selectedIssues.size === 0;
+  btn.textContent = selectedIssues.size
+    ? `Activate ${selectedIssues.size} Selected`
+    : 'Activate Selected';
+}
+
+async function activateSelected() {
+  if (!selectedIssues.size) return;
+  try {
+    const resp = await fetch(`${API}/actions/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue_numbers: [...selectedIssues] }),
+    });
+    const data = await resp.json();
+    alert(`Activated: ${data.activated?.length || 0} issues`);
+    refresh();
+  } catch (e) { alert(`Error: ${e.message}`); }
+}
+
+async function triggerScan() {
+  try {
+    await fetch(`${API}/actions/scan`, { method: 'POST' });
+    alert('Scan triggered — results will appear in the activity feed.');
+  } catch (e) { alert(`Error: ${e.message}`); }
+}
+
+async function loadActivity() {
+  const eventType = document.getElementById('event-filter').value;
+  const params = new URLSearchParams({ limit: '50' });
+  if (eventType) params.set('event_type', eventType);
+
+  try {
+    const events = await fetchJSON(`${API}/activity?${params}`);
+    const el = document.getElementById('activity-list');
+    if (!events.length) {
+      el.innerHTML = '<div class="loading">No events yet. Trigger a scan or activate issues.</div>';
+      return;
+    }
+    el.innerHTML = events.map(e => `
+      <div class="event">
+        <span class="event-time">${fmtTime(e.created_at)}</span>
+        <span class="event-type">${e.event_type}</span>
+        <span style="min-width:50px">#${e.issue_number}</span>
+        <span class="event-detail">${summarizeDetail(e)}</span>
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('activity-list').innerHTML = `<div class="error">${e.message}</div>`;
+  }
+}
+
+function summarizeDetail(e) {
+  const d = e.detail || {};
+  if (e.event_type === 'classified') return `${esc(d.category || '')} — ${esc(d.reason || '')}`;
+  if (e.event_type === 'quality_gate') return `score=${esc(String(d.score || ''))}/10, verdict=${esc(d.verdict || '')}`;
+  if (e.event_type === 'launched') return `mode=${esc(d.mode || '')}`;
+  if (e.event_type === 'launch_failed') return esc(d.reason || '');
+  if (e.event_type === 'budget_blocked') return esc(d.reason || '');
+  if (e.event_type === 'manual_activate') return 'Added ag/todo';
+  if (e.event_type === 'manual_classify') return `${esc(d.category || '')} — ${esc(d.reason || '')}`;
+  return esc(JSON.stringify(d).slice(0, 100));
+}
+
+async function showDetail(issueNumber) {
+  document.getElementById('detail-modal').classList.add('active');
+  const mc = document.getElementById('modal-content');
+  mc.innerHTML = '<div class="loading">Loading...</div>';
+
+  try {
+    const data = await fetchJSON(`${API}/issues/${issueNumber}`);
+    const gh = data.github || {};
+    const state = data.db_state || {};
+    const meta = state.metadata || {};
+
+    let html = `<h2>#${issueNumber}: ${esc(gh.title || 'Unknown')}</h2>`;
+    html += `<p>Author: ${gh.author || '—'} &middot; Labels: ${(gh.labels || []).join(', ') || '—'}</p>`;
+    html += `<p>Classification: <strong>${state.classification || '—'}</strong> &middot; `;
+    html += `Confidence: ${meta.confidence_score != null ? meta.confidence_score + '/10' : '—'} &middot; `;
+    html += `Retries: ${state.retry_count || 0}</p>`;
+
+    // Executions
+    if (data.executions?.length) {
+      html += `<h3 style="margin-top:16px">Executions</h3>`;
+      data.executions.forEach(ex => {
+        const statusClass = ex.status === 'completed' ? 'done' : ex.status === 'failed' ? 'failed' : 'in-progress';
+        html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">`;
+        html += `<div style="display:flex;justify-content:space-between;align-items:center">
+          <span><strong>${ex.mode || '?'}</strong> <span class="stage-badge stage-${statusClass}">${ex.status}</span></span>
+          <span style="color:var(--muted);font-size:12px">${fmtTime(ex.started_at)} → ${fmtTime(ex.completed_at)}</span>
+        </div>`;
+
+        // PR/branch info
+        if (ex.pr_number || ex.branch) {
+          html += `<div style="margin-top:4px">`;
+          if (ex.pr_number) {
+            const repo = data.repo || '';
+            html += `<a href="https://github.com/${repo}/pull/${ex.pr_number}" target="_blank">PR #${ex.pr_number}</a> `;
+          }
+          if (ex.branch) html += `<span style="color:var(--muted);font-size:12px">branch: ${esc(ex.branch)}</span>`;
+          html += `</div>`;
+        }
+
+        // Session link (Oz) + cost
+        if (ex.session_link || ex.cost_cents != null) {
+          html += `<div style="margin-top:4px">`;
+          if (ex.session_link) html += `<a href="${esc(ex.session_link)}" target="_blank" style="color:var(--purple)">View in Oz</a> `;
+          if (ex.cost_cents != null) html += `<span style="color:var(--muted);font-size:12px">Cost: $${(ex.cost_cents / 100).toFixed(2)}</span>`;
+          html += `</div>`;
+        }
+
+        // Expandable prompt
+        if (ex.prompt) {
+          html += `<details style="margin-top:4px">
+            <summary style="cursor:pointer;color:var(--accent);font-size:12px">Show prompt</summary>
+            <pre style="margin-top:4px;padding:8px;background:var(--bg);border-radius:4px;font-size:11px;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word">${esc(ex.prompt)}</pre>
+          </details>`;
+        }
+
+        // Expandable result
+        if (ex.result) {
+          html += `<details style="margin-top:4px">
+            <summary style="cursor:pointer;color:var(--muted);font-size:12px">Show result</summary>
+            <pre style="margin-top:4px;padding:8px;background:var(--bg);border-radius:4px;font-size:11px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word">${esc(ex.result)}</pre>
+          </details>`;
+        }
+
+        // Execution timeline (lazy-loaded)
+        const tlId = 'tl-' + ex.id.replace(/-/g, '').slice(0, 12);
+        html += `<details style="margin-top:4px" ontoggle="if(this.open)loadTimeline('${ex.id}','${tlId}')">
+          <summary style="cursor:pointer;color:var(--accent);font-size:12px">Show execution timeline</summary>
+          <div id="${tlId}" style="margin-top:8px;max-height:400px;overflow-y:auto"><div class="loading">Loading...</div></div>
+        </details>`;
+
+        html += `</div>`;
+      });
+    }
+
+    // Pipeline events (audit trail)
+    if (data.pipeline_events?.length) {
+      html += `<h3 style="margin-top:16px">Audit Trail</h3>`;
+      data.pipeline_events.forEach(ev => {
+        html += `<div class="timeline-item">
+          <span class="time">${fmtTime(ev.created_at)}</span>
+          <span class="type">${ev.event_type}</span>
+          <div class="detail">${summarizeDetail(ev)}</div>
+        </div>`;
+      });
+    } else {
+      html += `<p style="margin-top:16px;color:var(--muted)">No pipeline events recorded yet.</p>`;
+    }
+
+    // Actions
+    html += `<div style="margin-top:16px;display:flex;gap:8px">
+      <button onclick="retryIssue(${issueNumber})">Retry</button>
+      <button onclick="classifyIssue(${issueNumber})">Classify</button>
+    </div>`;
+
+    mc.innerHTML = html;
+  } catch (e) {
+    mc.innerHTML = `<div class="error">${e.message}</div>`;
+  }
+}
+
+function closeModal() { document.getElementById('detail-modal').classList.remove('active'); }
+
+async function retryIssue(num) {
+  try {
+    await fetch(`${API}/actions/retry/${num}`, { method: 'POST' });
+    alert(`Issue #${num} reset to ag/todo`);
+    closeModal(); refresh();
+  } catch (e) { alert(`Error: ${e.message}`); }
+}
+
+async function classifyIssue(num) {
+  try {
+    const resp = await fetch(`${API}/actions/classify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue_numbers: [num] }),
+    });
+    const data = await resp.json();
+    const r = data.results?.[0];
+    alert(r?.error ? `Error: ${r.error}` : `Classified as ${r?.classification}: ${r?.reason}`);
+    closeModal(); refresh();
+  } catch (e) { alert(`Error: ${e.message}`); }
+}
+
+async function loadTimeline(executionId, containerId) {
+  const el = document.getElementById(containerId);
+  try {
+    const events = await fetchJSON(`${API}/executions/${executionId}/events`);
+    if (!events.length) {
+      el.innerHTML = '<div style="color:var(--muted);font-size:12px">No events recorded (Oz executions: use "View in Oz" link above)</div>';
+      return;
+    }
+    el.innerHTML = events.map(ev => {
+      let icon = '💬';
+      if (ev.message_type === 'tool_use') icon = '🔧';
+      else if (ev.message_type === 'tool_result') icon = '📎';
+      else if (ev.message_type === 'system') icon = '⚙️';
+      else if (ev.message_type === 'result') icon = '🏁';
+      const label = ev.message_type === 'tool_use' ? (ev.tool_name || 'tool') : ev.message_type;
+      const content = ev.content ? esc(ev.content.length > 300 ? ev.content.slice(0, 300) + '...' : ev.content) : '';
+      return `<div class="timeline-item">
+        <span class="time">${fmtTime(ev.created_at)}</span>
+        <span class="type">${icon} ${label}</span>
+        ${content ? `<div class="detail">${content}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) { el.innerHTML = `<div class="error">${e.message}</div>`; }
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+async function refresh() {
+  document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
+  await Promise.all([loadOverview(), loadIssues(), loadActivity()]);
+}
+
+// Keyboard: Escape closes modal
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// Initial load
+refresh();
+
+// Auto-refresh every 60s
+setInterval(refresh, 60000);
+</script>
+</body>
+</html>

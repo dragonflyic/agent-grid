@@ -156,6 +156,19 @@ async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
         )
         return
 
+    # Route PR comments to PR_COMMENT so scheduler can launch agents on agent branches
+    if is_pull_request:
+        await event_bus.publish(
+            EventType.PR_COMMENT,
+            {
+                "repo": repo_full_name,
+                "pr_number": issue_number,
+                "comment_body": comment_body,
+                "comment_author": comment.get("user", {}).get("login", ""),
+            },
+        )
+        return
+
     # Publish comment event for ag/* issues so scheduler can react
     has_ag_label = any(label.startswith("ag/") for label in labels)
     if has_ag_label:
@@ -166,7 +179,7 @@ async def _handle_issue_comment_event(data: dict[str, Any]) -> None:
                 "issue_id": str(issue_number),
                 "comment_body": comment_body,
                 "labels": labels,
-                "is_pull_request": is_pull_request,
+                "is_pull_request": False,
                 "comment_author": comment.get("user", {}).get("login", ""),
             },
         )
@@ -250,15 +263,21 @@ async def _handle_check_run_event(data: dict[str, Any]) -> None:
 
     # Get associated PRs — only care about agent branches
     pull_requests = check_run.get("pull_requests", [])
-    if not pull_requests:
-        return
+    if pull_requests:
+        pr = pull_requests[0]
+        head_branch = pr.get("head", {}).get("ref", "")
+        head_sha = pr.get("head", {}).get("sha", "")
+        pr_number = pr.get("number")
+    else:
+        # Fallback for push-triggered CI (pull_requests is empty)
+        check_suite = check_run.get("check_suite", {})
+        head_branch = check_suite.get("head_branch", "")
+        head_sha = check_run.get("head_sha", "")
+        pr_number = None
 
-    pr = pull_requests[0]
-    head_branch = pr.get("head", {}).get("ref", "")
     if not head_branch.startswith("agent/"):
         return
 
-    head_sha = pr.get("head", {}).get("sha", "")
     repo = data.get("repository", {}).get("full_name", "")
 
     if not repo:
@@ -279,7 +298,7 @@ async def _handle_check_run_event(data: dict[str, Any]) -> None:
         EventType.CHECK_RUN_FAILED,
         {
             "repo": repo,
-            "pr_number": pr.get("number"),
+            "pr_number": pr_number,
             "branch": head_branch,
             "head_sha": head_sha,
             "check_name": check_run.get("name", ""),

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 import uvicorn
@@ -11,7 +12,9 @@ from fastapi import FastAPI
 from .config import settings
 from .coordinator import (
     coordinator_router,
+    dashboard_router,
     get_agent_event_logger,
+    get_agent_event_persister,
     get_database,
     get_management_loop,
     get_scheduler,
@@ -59,6 +62,9 @@ async def _connect_and_start_services(db, logger) -> None:
     agent_logger = get_agent_event_logger()
     await agent_logger.start()
 
+    event_persister = get_agent_event_persister()
+    await event_persister.start()
+
     # Start Oz polling if using Oz backend
     if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
         from .execution_grid.oz_grid import get_oz_execution_grid
@@ -100,6 +106,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     agent_logger = get_agent_event_logger()
     await agent_logger.stop()
+    event_persister = get_agent_event_persister()
+    await event_persister.stop()
     management_loop = get_management_loop()
     await management_loop.stop()
     scheduler = get_scheduler()
@@ -137,8 +145,12 @@ app = FastAPI(
 
 # Register routers
 app.include_router(coordinator_router)
+app.include_router(dashboard_router)
 app.include_router(webhook_router)
 app.include_router(issues_router)
+
+
+_static_dir = Path(__file__).parent / "static"
 
 
 @app.get("/")
@@ -149,6 +161,14 @@ async def root() -> dict[str, str]:
         "version": "0.1.0",
         "status": "running",
     }
+
+
+@app.get("/dashboard")
+async def serve_dashboard():
+    """Serve the pipeline dashboard UI."""
+    from fastapi.responses import FileResponse
+
+    return FileResponse(_static_dir / "dashboard.html")
 
 
 def run() -> None:

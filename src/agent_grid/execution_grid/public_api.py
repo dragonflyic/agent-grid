@@ -57,6 +57,7 @@ class EventType(str, Enum):
     ISSUE_COMMENT = "issue.comment"
     NUDGE_REQUESTED = "nudge.requested"
     PR_REVIEW = "pr.review"
+    PR_COMMENT = "pr.comment"
     PR_CLOSED = "pr.closed"
     CHECK_RUN_FAILED = "check_run.failed"
 

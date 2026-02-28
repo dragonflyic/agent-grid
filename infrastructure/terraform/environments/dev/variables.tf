@@ -99,3 +99,15 @@ variable "oz_environment_id" {
   default     = ""
 }
 
+variable "github_project_owner" {
+  description = "GitHub org/user that owns the project board"
+  type        = string
+  default     = ""
+}
+
+variable "github_project_number" {
+  description = "GitHub Projects v2 board number"
+  type        = string
+  default     = ""
+}
+

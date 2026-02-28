@@ -185,6 +185,8 @@ class DryRunDatabase:
         self._issue_states: dict[tuple[int, str], dict] = {}
         self._cron_state: dict[str, dict] = {}
         self._checkpoints: dict[str, dict] = {}
+        self._pipeline_events: list[dict] = []
+        self._agent_events: list[dict] = []
 
     async def connect(self) -> None:
         pass
@@ -284,9 +286,9 @@ class DryRunDatabase:
     ) -> None:
         if execution_id in self._executions:
             execution = self._executions[execution_id]["execution"]
-            if status:
+            if status is not None:
                 execution.status = status
-            if result:
+            if result is not None:
                 execution.result = result
 
     async def set_external_run_id(self, execution_id: UUID, external_run_id: str) -> None:
@@ -300,6 +302,128 @@ class DryRunDatabase:
 
     async def get_total_budget_usage(self, **kwargs) -> dict:
         return {"tokens_used": 0, "duration_seconds": 0}
+
+    # Pipeline events (audit trail)
+
+    async def record_pipeline_event(
+        self, issue_number: int, repo: str, event_type: str, stage: str, detail: dict | None = None
+    ) -> None:
+        self._pipeline_events.append(
+            {
+                "id": str(uuid4()),
+                "issue_number": issue_number,
+                "repo": repo,
+                "event_type": event_type,
+                "stage": stage,
+                "detail": detail,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    async def get_pipeline_events(
+        self,
+        repo: str,
+        issue_number: int | None = None,
+        event_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        events = self._pipeline_events
+        events = [e for e in events if e["repo"] == repo]
+        if issue_number is not None:
+            events = [e for e in events if e["issue_number"] == issue_number]
+        if event_type is not None:
+            events = [e for e in events if e["event_type"] == event_type]
+        events.sort(key=lambda e: e["created_at"], reverse=True)
+        return events[offset : offset + limit]
+
+    async def get_pipeline_stats(self, repo: str) -> dict:
+        classifications: dict[str, int] = {}
+        for state in self._issue_states.values():
+            if state.get("repo") == repo:
+                c = state.get("classification") or "unclassified"
+                classifications[c] = classifications.get(c, 0) + 1
+        execution_counts: dict[str, int] = {}
+        for e in self._executions.values():
+            # Filter by repo (repo_url is like "https://github.com/org/repo.git")
+            if repo not in (e["execution"].repo_url or ""):
+                continue
+            s = e["execution"].status.value if hasattr(e["execution"].status, "value") else str(e["execution"].status)
+            execution_counts[s] = execution_counts.get(s, 0) + 1
+        total = sum(1 for s in self._issue_states.values() if s.get("repo") == repo)
+        return {"classifications": classifications, "execution_counts": execution_counts, "total_tracked_issues": total}
+
+    async def list_all_issue_states(self, repo: str, limit: int = 500, offset: int = 0) -> list[dict]:
+        results = [s for s in self._issue_states.values() if s.get("repo") == repo]
+        return results[offset : offset + limit]
+
+    # Agent events (execution-level audit trail)
+
+    async def record_agent_event(
+        self,
+        execution_id: UUID,
+        message_type: str,
+        content: str | None = None,
+        tool_name: str | None = None,
+        tool_id: str | None = None,
+    ) -> None:
+        self._agent_events.append(
+            {
+                "id": str(uuid4()),
+                "execution_id": str(execution_id),
+                "message_type": message_type,
+                "content": content,
+                "tool_name": tool_name,
+                "tool_id": tool_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    async def get_agent_events(
+        self,
+        execution_id: UUID,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict]:
+        events = self._agent_events
+        filtered = [e for e in events if e["execution_id"] == str(execution_id)]
+        filtered.sort(key=lambda e: e["created_at"])
+        return filtered[offset : offset + limit]
+
+    async def list_executions_for_dashboard(
+        self,
+        issue_id: str,
+        limit: int = 20,
+    ) -> list[dict]:
+        results = []
+        for entry in self._executions.values():
+            if entry["issue_id"] == issue_id:
+                e = entry["execution"]
+                s = e.status.value if hasattr(e.status, "value") else e.status
+                results.append(
+                    {
+                        "id": str(e.id),
+                        "status": s,
+                        "mode": e.mode,
+                        "prompt": e.prompt,
+                        "result": e.result,
+                        "pr_number": None,
+                        "branch": None,
+                        "external_run_id": None,
+                        "session_link": None,
+                        "cost_cents": None,
+                        "started_at": e.started_at.isoformat() if e.started_at else None,
+                        "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+                        "created_at": e.created_at.isoformat() if hasattr(e, "created_at") and e.created_at else None,
+                    }
+                )
+        return results[:limit]
+
+    async def set_session_link(self, execution_id: UUID, session_link: str) -> None:
+        pass
+
+    async def set_cost(self, execution_id: UUID, cost_cents: int) -> None:
+        pass
 
 
 class DryRunLabelManager:
@@ -334,8 +458,9 @@ class DryRunExecutionGrid(ExecutionGrid):
         mode: str = "implement",
         issue_number: int | None = None,
         context: dict | None = None,
+        execution_id: UUID | None = None,
     ) -> UUID:
-        execution_id = uuid4()
+        execution_id = execution_id or uuid4()
         self._log.log(
             "launch_agent",
             execution_id=execution_id,
@@ -399,6 +524,10 @@ def install_dry_run_wrappers() -> None:
     # Replace execution grid
     grid_service._service = None
     grid_service._fly_grid = DryRunExecutionGrid()
+    # Reset Oz grid singleton too
+    import agent_grid.execution_grid.oz_grid as oz_mod
+
+    oz_mod._oz_grid = None
     # Also override mode so get_execution_grid returns our dry grid
     settings.deployment_mode = "coordinator"
 
@@ -406,13 +535,18 @@ def install_dry_run_wrappers() -> None:
     # so they pick up the dry-run wrappers when re-initialized
     import agent_grid.coordinator.blocker_resolver as blocker_mod
     import agent_grid.coordinator.budget_manager as budget_mod
+    import agent_grid.coordinator.ci_monitor as ci_monitor_mod
     import agent_grid.coordinator.dependency_resolver as dep_mod
     import agent_grid.coordinator.planner as planner_mod
     import agent_grid.coordinator.pr_monitor as pr_monitor_mod
     import agent_grid.coordinator.proactive_scanner as proactive_scanner_mod
     import agent_grid.coordinator.quality_gate as quality_gate_mod
     import agent_grid.coordinator.scanner as scanner_mod
+    import agent_grid.issue_tracker.project_manager as project_mod
 
+    ci_monitor_mod._ci_monitor = None
+    project_mod._project_manager = None
+    settings.github_project_number = None  # Disable Projects in dry-run
     scanner_mod._scanner = None
     planner_mod._planner = None
     pr_monitor_mod._pr_monitor = None
