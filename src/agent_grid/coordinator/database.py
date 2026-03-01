@@ -666,6 +666,46 @@ class Database:
                 for m in result.scalars().all()
             ]
 
+    async def list_all_executions_for_dashboard(
+        self,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List executions across all issues for dashboard display."""
+        async with self._session() as session:
+            stmt = select(ExecutionModel).order_by(ExecutionModel.created_at.desc())
+            if status:
+                stmt = stmt.where(ExecutionModel.status == status)
+            stmt = stmt.limit(limit).offset(offset)
+            result = await session.execute(stmt)
+            return [
+                {
+                    "id": str(m.id),
+                    "issue_id": m.issue_id,
+                    "status": m.status,
+                    "mode": m.mode,
+                    "prompt": (m.prompt or "")[:200],
+                    "result": (m.result or "")[:200],
+                    "pr_number": m.pr_number,
+                    "branch": m.branch,
+                    "external_run_id": m.external_run_id,
+                    "session_link": m.session_link,
+                    "cost_cents": m.cost_cents,
+                    "started_at": m.started_at.isoformat() if m.started_at else None,
+                    "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in result.scalars().all()
+            ]
+
+    async def get_execution_counts_by_issue(self) -> dict[str, int]:
+        """Return {issue_id: execution_count} for all issues."""
+        async with self._session() as session:
+            stmt = select(ExecutionModel.issue_id, func.count()).group_by(ExecutionModel.issue_id)
+            result = await session.execute(stmt)
+            return {row[0]: row[1] for row in result.all()}
+
     async def set_session_link(self, execution_id: UUID, session_link: str) -> None:
         """Store the Oz session link for an execution."""
         async with self._session() as session:

@@ -166,13 +166,15 @@ class TestDashboardIssues:
         ):
             result = await list_issues()
 
-        assert len(result) == 2
-        issue1 = next(i for i in result if i["issue_number"] == 1)
+        assert result["total"] == 2
+        items = result["items"]
+        assert len(items) == 2
+        issue1 = next(i for i in items if i["issue_number"] == 1)
         assert issue1["pipeline_stage"] == "in-progress"
         assert issue1["classification"] == "SIMPLE"
         assert issue1["confidence_score"] == 8
 
-        issue2 = next(i for i in result if i["issue_number"] == 2)
+        issue2 = next(i for i in items if i["issue_number"] == 2)
         assert issue2["pipeline_stage"] == "unlabeled"
         assert issue2["classification"] is None
 
@@ -196,8 +198,59 @@ class TestDashboardIssues:
         ):
             result = await list_issues(stage="unlabeled")
 
-        assert len(result) == 1
-        assert result[0]["issue_number"] == 2
+        assert result["total"] == 1
+        assert result["items"][0]["issue_number"] == 2
+
+    @pytest.mark.asyncio
+    async def test_issues_search_by_title(self):
+        """Issues can be searched by title."""
+        from agent_grid.coordinator.dashboard_api import list_issues
+
+        mock_tracker = AsyncMock()
+        mock_tracker.list_issues.return_value = [
+            _make_issue(1, title="Fix auth bug"),
+            _make_issue(2, title="Add dark mode"),
+            _make_issue(3, title="Auth refactor"),
+        ]
+
+        db = DryRunDatabase()
+
+        with (
+            patch("agent_grid.issue_tracker.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.database.get_database", return_value=db),
+            patch("agent_grid.config.settings", MagicMock(target_repo="org/repo")),
+        ):
+            result = await list_issues(search="auth")
+
+        assert result["total"] == 2
+        nums = {i["issue_number"] for i in result["items"]}
+        assert nums == {1, 3}
+
+    @pytest.mark.asyncio
+    async def test_issues_pagination(self):
+        """Issues endpoint paginates correctly."""
+        from agent_grid.coordinator.dashboard_api import list_issues
+
+        mock_tracker = AsyncMock()
+        mock_tracker.list_issues.return_value = [_make_issue(i) for i in range(1, 11)]
+
+        db = DryRunDatabase()
+
+        with (
+            patch("agent_grid.issue_tracker.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.database.get_database", return_value=db),
+            patch("agent_grid.config.settings", MagicMock(target_repo="org/repo")),
+        ):
+            page1 = await list_issues(limit=3, offset=0)
+            page2 = await list_issues(limit=3, offset=3)
+
+        assert page1["total"] == 10
+        assert len(page1["items"]) == 3
+        assert len(page2["items"]) == 3
+        # No overlap
+        nums1 = {i["issue_number"] for i in page1["items"]}
+        nums2 = {i["issue_number"] for i in page2["items"]}
+        assert nums1.isdisjoint(nums2)
 
 
 class TestDashboardActions:
@@ -407,3 +460,80 @@ class TestExecutionEventsEndpoint:
             result = await get_execution_events(str(uuid4()))
 
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Active executions listing tests
+# ---------------------------------------------------------------------------
+
+
+class TestListExecutions:
+    @pytest.mark.asyncio
+    async def test_list_all_executions(self):
+        """GET /executions returns all executions."""
+        from agent_grid.coordinator.dashboard_api import list_executions
+
+        db = DryRunDatabase()
+        for issue_id in ["10", "20", "30"]:
+            exec = AgentExecution(
+                id=uuid4(),
+                repo_url="https://github.com/org/repo.git",
+                status=ExecutionStatus.RUNNING,
+                mode="implement",
+            )
+            await db.create_execution(exec, issue_id=issue_id)
+
+        with patch("agent_grid.coordinator.database.get_database", return_value=db):
+            result = await list_executions()
+
+        assert len(result) == 3
+        assert all("issue_id" in r for r in result)
+
+    @pytest.mark.asyncio
+    async def test_filter_by_status(self):
+        """GET /executions?status=running filters by status."""
+        from agent_grid.coordinator.dashboard_api import list_executions
+
+        db = DryRunDatabase()
+        running = AgentExecution(
+            id=uuid4(),
+            repo_url="https://github.com/org/repo.git",
+            status=ExecutionStatus.RUNNING,
+            mode="implement",
+        )
+        completed = AgentExecution(
+            id=uuid4(),
+            repo_url="https://github.com/org/repo.git",
+            status=ExecutionStatus.COMPLETED,
+            mode="implement",
+        )
+        await db.create_execution(running, issue_id="10")
+        await db.create_execution(completed, issue_id="20")
+
+        with patch("agent_grid.coordinator.database.get_database", return_value=db):
+            result = await list_executions(status="running")
+
+        assert len(result) == 1
+        assert result[0]["status"] == "running"
+
+    @pytest.mark.asyncio
+    async def test_truncates_prompt_and_result(self):
+        """Executions list truncates prompt and result to 200 chars."""
+        from agent_grid.coordinator.dashboard_api import list_executions
+
+        db = DryRunDatabase()
+        exec = AgentExecution(
+            id=uuid4(),
+            repo_url="https://github.com/org/repo.git",
+            status=ExecutionStatus.RUNNING,
+            prompt="x" * 500,
+            result="y" * 500,
+            mode="implement",
+        )
+        await db.create_execution(exec, issue_id="10")
+
+        with patch("agent_grid.coordinator.database.get_database", return_value=db):
+            result = await list_executions()
+
+        assert len(result[0]["prompt"]) == 200
+        assert len(result[0]["result"]) == 200

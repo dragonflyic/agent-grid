@@ -79,10 +79,11 @@ async def list_issues(
     repo: str | None = None,
     stage: str | None = None,
     classification: str | None = None,
-    limit: int = 100,
+    search: str | None = None,
+    limit: int = 50,
     offset: int = 0,
-) -> list[dict]:
-    """All open issues merged with DB state. Filterable by stage/classification."""
+) -> dict:
+    """Paginated open issues merged with DB state. Returns {items, total}."""
     from ..config import settings
     from ..issue_tracker import get_issue_tracker
     from ..issue_tracker.public_api import IssueStatus
@@ -98,6 +99,7 @@ async def list_issues(
     all_open = await tracker.list_issues(actual_repo, status=IssueStatus.OPEN)
     all_states = await db.list_all_issue_states(actual_repo, limit=9999)
     state_map = {s["issue_number"]: s for s in all_states}
+    exec_counts = await db.get_execution_counts_by_issue()
 
     results = []
     for issue in all_open:
@@ -113,6 +115,11 @@ async def list_issues(
         if stage and pipeline_stage != stage:
             continue
 
+        if search:
+            q = search.lower()
+            if q not in (issue.title or "").lower() and q not in str(issue.number):
+                continue
+
         metadata = state.get("metadata") or {}
         results.append(
             {
@@ -127,12 +134,13 @@ async def list_issues(
                 "confidence_verdict": metadata.get("confidence_verdict"),
                 "retry_count": state.get("retry_count", 0),
                 "last_checked_at": state.get("last_checked_at"),
+                "execution_count": exec_counts.get(str(issue.number), 0),
                 "created_at": issue.created_at.isoformat() if issue.created_at else None,
             }
         )
 
     results.sort(key=lambda x: x["issue_number"], reverse=True)
-    return results[offset : offset + limit]
+    return {"items": results[offset : offset + limit], "total": len(results)}
 
 
 @dashboard_router.get("/issues/{issue_number}")
@@ -198,6 +206,19 @@ async def activity_feed(
         limit=limit,
         offset=offset,
     )
+
+
+@dashboard_router.get("/executions")
+async def list_executions(
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """List executions across all issues. Filterable by status."""
+    from .database import get_database
+
+    db = get_database()
+    return await db.list_all_executions_for_dashboard(status=status, limit=limit, offset=offset)
 
 
 @dashboard_router.get("/executions/{execution_id}/events")

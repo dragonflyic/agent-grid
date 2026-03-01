@@ -419,6 +419,45 @@ class DryRunDatabase:
                 )
         return results[:limit]
 
+    async def list_all_executions_for_dashboard(
+        self,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        results = []
+        for entry in self._executions.values():
+            e = entry["execution"]
+            s = e.status.value if hasattr(e.status, "value") else e.status
+            if status and s != status:
+                continue
+            results.append(
+                {
+                    "id": str(e.id),
+                    "issue_id": entry["issue_id"],
+                    "status": s,
+                    "mode": e.mode,
+                    "prompt": (e.prompt or "")[:200],
+                    "result": (e.result or "")[:200],
+                    "pr_number": None,
+                    "branch": None,
+                    "external_run_id": None,
+                    "session_link": None,
+                    "cost_cents": None,
+                    "started_at": e.started_at.isoformat() if e.started_at else None,
+                    "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+                    "created_at": e.created_at.isoformat() if hasattr(e, "created_at") and e.created_at else None,
+                }
+            )
+        return results[offset : offset + limit]
+
+    async def get_execution_counts_by_issue(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for entry in self._executions.values():
+            iid = entry["issue_id"]
+            counts[iid] = counts.get(iid, 0) + 1
+        return counts
+
     async def set_session_link(self, execution_id: UUID, session_link: str) -> None:
         pass
 
