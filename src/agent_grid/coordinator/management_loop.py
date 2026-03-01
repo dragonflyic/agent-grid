@@ -152,6 +152,7 @@ class ManagementLoop:
 
         # Phase 4: Monitor in-progress
         await self._check_in_progress(repo)
+        await self._reap_stale_in_progress(repo)
 
         # Phase 5: Monitor PRs for review comments
         pr_monitor = get_pr_monitor()
@@ -771,6 +772,63 @@ class ManagementLoop:
                 execution.status = ExecutionStatus.FAILED
                 execution.result = "Timed out"
                 await self._db.update_execution(execution)
+                # Transition label so the issue exits in-progress
+                issue_id = await self._db.get_issue_id_for_execution(execution.id)
+                if issue_id:
+                    labels = get_label_manager()
+                    try:
+                        await labels.transition_to(repo, issue_id, "ag/failed")
+                    except Exception as e:
+                        logger.warning(f"Failed to transition issue #{issue_id} label: {e}")
+                    await self._db.record_pipeline_event(
+                        issue_number=int(issue_id),
+                        repo=repo,
+                        event_type="execution_timeout",
+                        stage="monitor",
+                        detail={"execution_id": str(execution.id), "elapsed_seconds": int(elapsed)},
+                    )
+                    logger.info(f"Issue #{issue_id}: timed out — transitioned to ag/failed")
+
+    async def _reap_stale_in_progress(self, repo: str) -> None:
+        """Phase 4b: Reap ag/in-progress issues with no active execution.
+
+        Catches issues where the execution finished but the label was never
+        transitioned (e.g., lost callbacks, bugs in older code).
+        """
+        from ..execution_grid import ExecutionStatus
+        from ..issue_tracker.public_api import IssueStatus
+
+        tracker = get_issue_tracker()
+        all_open = await tracker.list_issues(repo, status=IssueStatus.OPEN)
+        in_progress = [i for i in all_open if "ag/in-progress" in i.labels]
+
+        if not in_progress:
+            return
+
+        labels = get_label_manager()
+        reaped = 0
+        for issue in in_progress:
+            execution = await self._db.get_execution_for_issue(str(issue.number))
+            if execution and execution.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
+                continue  # Active execution — skip
+
+            logger.warning(f"Issue #{issue.number}: ag/in-progress but no active execution — reaping to ag/failed")
+            try:
+                await labels.transition_to(repo, str(issue.number), "ag/failed")
+            except Exception as e:
+                logger.warning(f"Failed to reap issue #{issue.number}: {e}")
+                continue
+            await self._db.record_pipeline_event(
+                issue_number=issue.number,
+                repo=repo,
+                event_type="stale_reaped",
+                stage="monitor",
+                detail={"reason": "in-progress with no active execution"},
+            )
+            reaped += 1
+
+        if reaped:
+            logger.info(f"Phase 4b: Reaped {reaped} stale in-progress issues")
 
     async def run_once(self) -> None:
         """Run a single cycle (for testing)."""

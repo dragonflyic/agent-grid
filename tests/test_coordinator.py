@@ -1,5 +1,6 @@
 """Tests for coordinator module."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -585,3 +586,195 @@ class TestPlannerBlockedBy:
 
         # Second should have ag/waiting label
         assert "ag/waiting" in created[1]["labels"]
+
+
+class TestCheckInProgressLabelTransition:
+    """Tests that _check_in_progress transitions timed-out issues to ag/failed."""
+
+    @pytest.mark.asyncio
+    async def test_timeout_transitions_label_to_failed(self):
+        """Timed-out execution must transition label to ag/failed and record event."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.execution_grid import AgentExecution, ExecutionStatus
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        exec_id = uuid4()
+        old_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        execution = AgentExecution(
+            id=exec_id,
+            repo_url="https://github.com/owner/repo",
+            status=ExecutionStatus.RUNNING,
+            prompt="test",
+            mode="implement",
+        )
+        execution.started_at = old_time
+        execution.created_at = old_time
+
+        mock_db = AsyncMock()
+        mock_db.get_running_executions = AsyncMock(return_value=[execution])
+        mock_db.list_executions = AsyncMock(return_value=[])
+        mock_db.update_execution = AsyncMock()
+        mock_db.get_issue_id_for_execution = AsyncMock(return_value="42")
+        mock_db.record_pipeline_event = AsyncMock()
+        loop._db = mock_db
+
+        mock_labels = AsyncMock()
+        mock_grid = AsyncMock()
+
+        with (
+            patch("agent_grid.coordinator.management_loop.get_label_manager", return_value=mock_labels),
+            patch("agent_grid.coordinator.management_loop.get_execution_grid", return_value=mock_grid),
+            patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
+        ):
+            mock_settings.execution_timeout_seconds = 3600
+
+            await loop._check_in_progress("owner/repo")
+
+        # Execution marked failed
+        mock_db.update_execution.assert_called_once()
+        updated = mock_db.update_execution.call_args[0][0]
+        assert updated.status == ExecutionStatus.FAILED
+        assert updated.result == "Timed out"
+
+        # Label transitioned to ag/failed
+        mock_labels.transition_to.assert_called_once_with("owner/repo", "42", "ag/failed")
+
+        # Pipeline event recorded
+        mock_db.record_pipeline_event.assert_called_once()
+        event_kwargs = mock_db.record_pipeline_event.call_args[1]
+        assert event_kwargs["issue_number"] == 42
+        assert event_kwargs["event_type"] == "execution_timeout"
+
+    @pytest.mark.asyncio
+    async def test_non_timed_out_execution_not_transitioned(self):
+        """Execution within timeout should not be touched."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.execution_grid import AgentExecution, ExecutionStatus, utc_now
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        execution = AgentExecution(
+            id=uuid4(),
+            repo_url="https://github.com/owner/repo",
+            status=ExecutionStatus.RUNNING,
+            prompt="test",
+            mode="implement",
+        )
+        execution.started_at = utc_now()
+        execution.created_at = utc_now()
+
+        mock_db = AsyncMock()
+        mock_db.get_running_executions = AsyncMock(return_value=[execution])
+        mock_db.list_executions = AsyncMock(return_value=[])
+        loop._db = mock_db
+
+        mock_grid = AsyncMock()
+
+        with (
+            patch("agent_grid.coordinator.management_loop.get_execution_grid", return_value=mock_grid),
+            patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
+        ):
+            mock_settings.execution_timeout_seconds = 3600
+
+            await loop._check_in_progress("owner/repo")
+
+        mock_db.update_execution.assert_not_called()
+
+
+class TestReapStaleInProgress:
+    """Tests for _reap_stale_in_progress phase 4b."""
+
+    @pytest.mark.asyncio
+    async def test_reaps_stuck_issue(self):
+        """Issue with ag/in-progress but failed execution should be reaped."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.execution_grid import AgentExecution, ExecutionStatus
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        stuck_issue = IssueInfo(
+            id="99",
+            number=99,
+            title="Stuck issue",
+            body="",
+            labels=["ag/in-progress"],
+            status=IssueStatus.OPEN,
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/99",
+        )
+
+        failed_exec = AgentExecution(
+            id=uuid4(),
+            issue_id="99",
+            repo_url="https://github.com/owner/repo",
+            status=ExecutionStatus.FAILED,
+            prompt="test",
+            mode="implement",
+        )
+
+        mock_db = AsyncMock()
+        mock_db.get_execution_for_issue = AsyncMock(return_value=failed_exec)
+        mock_db.record_pipeline_event = AsyncMock()
+        loop._db = mock_db
+
+        mock_tracker = AsyncMock()
+        mock_tracker.list_issues = AsyncMock(return_value=[stuck_issue])
+        mock_labels = AsyncMock()
+
+        with (
+            patch("agent_grid.coordinator.management_loop.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.management_loop.get_label_manager", return_value=mock_labels),
+        ):
+            await loop._reap_stale_in_progress("owner/repo")
+
+        mock_labels.transition_to.assert_called_once_with("owner/repo", "99", "ag/failed")
+        mock_db.record_pipeline_event.assert_called_once()
+        event_kwargs = mock_db.record_pipeline_event.call_args[1]
+        assert event_kwargs["event_type"] == "stale_reaped"
+
+    @pytest.mark.asyncio
+    async def test_skips_active_execution(self):
+        """Issue with a running execution should not be reaped."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.execution_grid import AgentExecution, ExecutionStatus
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        active_issue = IssueInfo(
+            id="50",
+            number=50,
+            title="Active issue",
+            body="",
+            labels=["ag/in-progress"],
+            status=IssueStatus.OPEN,
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/50",
+        )
+
+        running_exec = AgentExecution(
+            id=uuid4(),
+            issue_id="50",
+            repo_url="https://github.com/owner/repo",
+            status=ExecutionStatus.RUNNING,
+            prompt="test",
+            mode="implement",
+        )
+
+        mock_db = AsyncMock()
+        mock_db.get_execution_for_issue = AsyncMock(return_value=running_exec)
+        loop._db = mock_db
+
+        mock_tracker = AsyncMock()
+        mock_tracker.list_issues = AsyncMock(return_value=[active_issue])
+        mock_labels = AsyncMock()
+
+        with (
+            patch("agent_grid.coordinator.management_loop.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.management_loop.get_label_manager", return_value=mock_labels),
+        ):
+            await loop._reap_stale_in_progress("owner/repo")
+
+        mock_labels.transition_to.assert_not_called()
