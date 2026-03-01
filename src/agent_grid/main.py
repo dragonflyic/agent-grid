@@ -65,14 +65,18 @@ async def _connect_and_start_services(db, logger) -> None:
     event_persister = get_agent_event_persister()
     await event_persister.start()
 
-    # Start Oz polling if using Oz backend
+    # Start Oz polling if using Oz backend — wire callbacks first
     if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
+        from .coordinator.oz_callbacks import build_oz_callbacks
         from .execution_grid.oz_grid import get_oz_execution_grid
+        from .issue_tracker import get_issue_tracker as _get_tracker
 
         oz_grid = get_oz_execution_grid()
+        oz_grid.set_callbacks(build_oz_callbacks(db, _get_tracker()))
         await oz_grid.start_polling()
         logger.info(f"Oz polling started (interval={settings.oz_poll_interval_seconds}s)")
 
+    app.state.services_ready = True
     logger.info("All services started")
 
 

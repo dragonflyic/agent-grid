@@ -5,7 +5,7 @@ spawns a new agent to address the feedback on the existing branch.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..issue_tracker import get_issue_tracker
 from .database import get_database
@@ -41,30 +41,13 @@ class PRMonitor:
         Returns list of PRs that need review handling:
         [{"pr_number": N, "issue_id": "...", "review_comments": "...", "branch": "..."}]
         """
-        from ..issue_tracker.github_client import GitHubClient
-
-        if not isinstance(self._tracker, GitHubClient):
-            return []
-
-        github = self._tracker
-
         # Get last check time
         last_check_state = await self._db.get_cron_state("last_pr_check")
         last_check = last_check_state.get("timestamp") if last_check_state else None
 
-        # Fetch open PRs with ai-review-pending label
+        # Fetch open PRs
         prs_needing_attention = []
-
-        try:
-            response = await github._client.get(
-                f"/repos/{repo}/pulls",
-                params={"state": "open", "per_page": 100},
-            )
-            response.raise_for_status()
-            prs = response.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch PRs: {e}")
-            return []
+        prs = await self._tracker.list_open_prs(repo, per_page=100)
 
         for pr in prs:
             # Only check PRs from agent branches
@@ -75,24 +58,9 @@ class PRMonitor:
             pr_number = pr["number"]
             pr_author = pr.get("user", {}).get("login", "")
 
-            # Fetch review comments
-            try:
-                reviews_resp = await github._client.get(
-                    f"/repos/{repo}/pulls/{pr_number}/reviews",
-                    params={"per_page": 100},
-                )
-                reviews_resp.raise_for_status()
-                reviews = reviews_resp.json()
-
-                comments_resp = await github._client.get(
-                    f"/repos/{repo}/pulls/{pr_number}/comments",
-                    params={"per_page": 100},
-                )
-                comments_resp.raise_for_status()
-                pr_comments = comments_resp.json()
-            except Exception as e:
-                logger.error(f"Failed to fetch reviews for PR #{pr_number}: {e}")
-                continue
+            # Fetch review comments via ABC methods
+            reviews = await self._tracker.get_pr_reviews(repo, pr_number)
+            pr_comments = await self._tracker.get_pr_comments(repo, pr_number)
 
             # Filter for new human comments since last check
             # Skip bot comments and self-comments (agent reviewing its own PR)
@@ -145,7 +113,7 @@ class PRMonitor:
         if update_timestamp:
             await self._db.set_cron_state(
                 "last_pr_check",
-                {"timestamp": _normalize_timestamp(datetime.utcnow().isoformat())},
+                {"timestamp": _normalize_timestamp(datetime.now(timezone.utc).isoformat())},
             )
 
         return prs_needing_attention
@@ -155,27 +123,11 @@ class PRMonitor:
 
         Returns list of closed PRs with human feedback.
         """
-        from ..issue_tracker.github_client import GitHubClient
-
-        if not isinstance(self._tracker, GitHubClient):
-            return []
-
-        github = self._tracker
         last_check_state = await self._db.get_cron_state("last_closed_pr_check")
         last_check = last_check_state.get("timestamp") if last_check_state else None
 
         prs_with_feedback = []
-
-        try:
-            response = await github._client.get(
-                f"/repos/{repo}/pulls",
-                params={"state": "closed", "per_page": 50, "sort": "updated", "direction": "desc"},
-            )
-            response.raise_for_status()
-            prs = response.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch closed PRs: {e}")
-            return []
+        prs = await self._tracker.list_open_prs(repo, state="closed", per_page=50, sort="updated", direction="desc")
 
         for pr in prs:
             head_branch = pr.get("head", {}).get("ref", "")
@@ -191,15 +143,7 @@ class PRMonitor:
                 continue
 
             # Get comments after close
-            try:
-                comments_resp = await github._client.get(
-                    f"/repos/{repo}/issues/{pr_number}/comments",
-                    params={"per_page": 50, "since": closed_at},
-                )
-                comments_resp.raise_for_status()
-                comments = comments_resp.json()
-            except Exception:
-                continue
+            comments = await self._tracker.get_issue_comments_since(repo, str(pr_number), since=closed_at)
 
             feedback = [c["body"] for c in comments if c.get("body")]
             if not feedback:
@@ -225,7 +169,7 @@ class PRMonitor:
 
         await self._db.set_cron_state(
             "last_closed_pr_check",
-            {"timestamp": _normalize_timestamp(datetime.utcnow().isoformat())},
+            {"timestamp": _normalize_timestamp(datetime.now(timezone.utc).isoformat())},
         )
 
         return prs_with_feedback

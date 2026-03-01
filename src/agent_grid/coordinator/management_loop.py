@@ -18,20 +18,19 @@ import asyncio
 import json
 import logging
 import re
-from uuid import uuid4
 
 from ..config import settings
-from ..execution_grid import AgentExecution, ExecutionConfig, ExecutionStatus, get_execution_grid, utc_now
+from ..execution_grid import get_execution_grid, utc_now
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
 from ..issue_tracker.metadata import embed_metadata
+from .agent_launcher import get_agent_launcher
 from .blocker_resolver import get_blocker_resolver
 from .budget_manager import get_budget_manager
 from .classifier import get_classifier
 from .database import get_database
 from .dependency_resolver import get_dependency_resolver
 from .pr_monitor import get_pr_monitor
-from .prompt_builder import build_prompt
 from .scanner import get_scanner
 
 logger = logging.getLogger("agent_grid.cron")
@@ -80,6 +79,7 @@ class ManagementLoop:
             return
 
         logger.info(f"=== Starting cron cycle for {repo} ===")
+        launcher = get_agent_launcher()
 
         # Phase 1: Scan
         scanner = get_scanner()
@@ -100,7 +100,6 @@ class ManagementLoop:
 
             classification = await classifier.classify(issue)
 
-            # Save classification to DB
             await self._db.upsert_issue_state(
                 issue_number=issue.number,
                 repo=repo,
@@ -139,30 +138,28 @@ class ManagementLoop:
                 logger.info(f"Issue #{issue.number}: BLOCKED — posted question")
                 continue
 
-            # Quality gate for SIMPLE and COMPLEX issues
             if settings.quality_gate_enabled:
-                gate_result = await self._run_quality_gate(repo, issue, classification, is_proactive=False)
+                gate_result = await launcher.run_quality_gate(repo, issue, classification, is_proactive=False)
                 if gate_result == "blocked":
                     continue
                 if gate_result == "skipped":
                     continue
 
             if classification.category == "SIMPLE":
-                await self._launch_simple(repo, issue)
+                await launcher.launch_simple(repo, issue)
             elif classification.category == "COMPLEX":
-                await self._launch_planner(repo, issue)
+                await launcher.launch_planner(repo, issue)
 
         # Phase 4: Monitor in-progress
         await self._check_in_progress(repo)
         await self._reap_stale_in_progress(repo)
 
-        # Phase 4c: Auto-retry failed issues that haven't exhausted retries
+        # Phase 4c: Auto-retry failed issues
         await self._auto_retry_failed(repo)
 
         # Phase 5: Monitor PRs for review comments
         pr_monitor = get_pr_monitor()
         prs_raw = await pr_monitor.check_prs(repo)
-        # Dedup by issue_id — merge review_comments for the same issue
         seen_pr_issues: dict[str, dict] = {}
         for pr_info in prs_raw:
             iid = pr_info.get("issue_id")
@@ -175,13 +172,13 @@ class ManagementLoop:
             else:
                 seen_pr_issues[iid] = dict(pr_info)
         for pr_info in seen_pr_issues.values():
-            await self._launch_review_handler(repo, pr_info)
+            await launcher.launch_review_handler(repo, pr_info)
 
         # Phase 6: Monitor closed PRs with feedback
         closed_prs = await pr_monitor.check_closed_prs(repo)
         for pr_info in closed_prs:
             if pr_info["issue_id"]:
-                await self._launch_retry(repo, pr_info)
+                await launcher.launch_retry(repo, pr_info)
 
         # Phase 7: Poll for CI failures (backup to webhook delivery)
         from .ci_monitor import get_ci_monitor
@@ -195,7 +192,6 @@ class ManagementLoop:
                 continue
             ci_issue_id = issue_match.group(1)
 
-            # Enforce retry limit (same as webhook path)
             ci_state = await self._db.get_issue_state(int(ci_issue_id), repo)
             ci_meta = (ci_state or {}).get("metadata") or {}
             if isinstance(ci_meta, str):
@@ -207,487 +203,38 @@ class ManagementLoop:
                 )
                 continue
 
-            check_info = await self._enrich_check_output(repo, check_info)
-            launched = await self._launch_ci_fix(repo, check_info)
+            check_info = await launcher.enrich_check_output(repo, check_info)
+            launched = await launcher.launch_ci_fix(repo, check_info)
             if launched:
-                # Update dedup cursor + fix count (mirrors webhook path)
-                updated_meta = {
-                    **ci_meta,
-                    "last_ci_check_sha": check_info.get("head_sha", ""),
-                    "ci_fix_count": ci_fix_count + 1,
-                }
-                await self._db.upsert_issue_state(
+                await self._db.merge_issue_metadata(
                     issue_number=int(ci_issue_id),
                     repo=repo,
-                    metadata=updated_meta,
+                    metadata_update={
+                        "last_ci_check_sha": check_info.get("head_sha", ""),
+                        "ci_fix_count": ci_fix_count + 1,
+                    },
                 )
                 ci_launched += 1
         if ci_launched:
             logger.info(f"Phase 7: Launched {ci_launched} CI fix agents")
 
-        # Phase 8: Resolve blockers — launch agents directly for unblocked issues
+        # Phase 8: Resolve blockers
         blocker_resolver = get_blocker_resolver()
         unblocked = await blocker_resolver.check_blocked_issues(repo)
         for issue in unblocked:
-            await self._launch_unblocked(repo, issue)
+            await launcher.launch_unblocked(repo, issue)
         if unblocked:
             logger.info(f"Phase 8: Launched {len(unblocked)} unblocked issues")
 
-        # Bonus: Check dependency resolution
         dep_resolver = get_dependency_resolver()
         await dep_resolver.check_dependencies(repo)
         await dep_resolver.check_parent_completion(repo)
 
-        # Phase 9: Proactive scan (runs every N cycles)
+        # Phase 9: Proactive scan
         if settings.proactive_scan_enabled:
             await self._maybe_run_proactive_scan(repo)
 
         logger.info("=== Cron cycle complete ===")
-
-    async def _claim_and_launch(
-        self,
-        issue_id: str,
-        repo_url: str,
-        prompt: str,
-        mode: str = "implement",
-        issue_number: int | None = None,
-        context: dict | None = None,
-    ) -> bool:
-        """Atomically claim an issue and launch the agent.
-
-        Claims the DB row FIRST to prevent races, then launches the Fly machine.
-        If launch fails, the execution is marked as FAILED.
-
-        Returns True if the agent was launched, False if claim failed.
-        """
-        execution_id = uuid4()
-        execution = AgentExecution(
-            id=execution_id,
-            repo_url=repo_url,
-            status=ExecutionStatus.PENDING,
-            prompt=prompt,
-            mode=mode,
-            started_at=utc_now(),
-        )
-
-        claimed = await self._db.try_claim_issue(execution, issue_id=issue_id)
-        if not claimed:
-            logger.info(f"Issue #{issue_id}: already has active execution, skipping")
-            repo = repo_url.replace("https://github.com/", "").replace(".git", "")
-            await self._db.record_pipeline_event(
-                int(issue_id) if issue_id.isdigit() else 0,
-                repo,
-                "launch_failed",
-                "launch",
-                {"reason": "duplicate_execution"},
-            )
-            return False
-
-        config = ExecutionConfig(repo_url=repo_url, prompt=prompt)
-        grid = get_execution_grid()
-        try:
-            from ..execution_grid.fly_grid import FlyExecutionGrid
-            from ..execution_grid.oz_grid import OzExecutionGrid
-
-            if isinstance(grid, (FlyExecutionGrid, OzExecutionGrid)):
-                kwargs: dict = {"mode": mode, "execution_id": execution_id}
-                if issue_number is not None:
-                    kwargs["issue_number"] = issue_number
-                if context is not None:
-                    kwargs["context"] = context
-                await grid.launch_agent(config, **kwargs)
-            else:
-                await grid.launch_agent(config)
-        except Exception as e:
-            logger.error(f"Failed to launch agent for issue #{issue_id}: {e}")
-            execution.status = ExecutionStatus.FAILED
-            execution.result = f"Launch failed: {e}"
-            await self._db.update_execution(execution)
-            repo = repo_url.replace("https://github.com/", "").replace(".git", "")
-            await self._db.record_pipeline_event(
-                int(issue_id) if issue_id.isdigit() else 0,
-                repo,
-                "launch_failed",
-                "launch",
-                {"reason": str(e)},
-            )
-            return False
-
-        # Record successful launch
-        repo = repo_url.replace("https://github.com/", "").replace(".git", "")
-        await self._db.record_pipeline_event(
-            int(issue_id) if issue_id.isdigit() else 0,
-            repo,
-            "launched",
-            "launch",
-            {"mode": mode, "execution_id": str(execution_id)},
-        )
-        return True
-
-    async def _resolve_reviewer(self, repo: str, issue) -> str | None:
-        """Resolve the right reviewer for an issue.
-
-        For sub-issues (ag/sub-issue label), look up the parent issue's author
-        since the sub-issue was created by the bot, not a human.
-        Falls back to issue.author if parent lookup fails.
-        """
-        if "ag/sub-issue" not in issue.labels:
-            return None  # Use default (issue.author)
-
-        # Parse parent issue number from title "[Sub #NNN]" or body "Part of #NNN"
-        parent_number = None
-        title_match = re.search(r"\[Sub #(\d+)\]", issue.title)
-        if title_match:
-            parent_number = title_match.group(1)
-        elif issue.body:
-            body_match = re.search(r"Part of #(\d+)", issue.body)
-            if body_match:
-                parent_number = body_match.group(1)
-
-        if not parent_number:
-            return None
-
-        try:
-            parent = await self._tracker.get_issue(repo, parent_number)
-            if parent and parent.author:
-                return parent.author
-        except Exception as e:
-            logger.warning(f"Issue #{issue.number}: failed to resolve parent #{parent_number} author: {e}")
-
-        return None
-
-    async def _has_active_execution(self, issue_id: str) -> bool:
-        """Check if there's already a running/pending execution for this issue."""
-        existing = await self._db.get_execution_for_issue(issue_id)
-        if existing and existing.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
-            logger.info(f"Issue #{issue_id}: already has active execution {existing.id}, skipping")
-            return True
-        return False
-
-    async def _launch_simple(self, repo: str, issue) -> None:
-        """Launch an agent for a SIMPLE issue."""
-        if await self._has_active_execution(issue.id):
-            return
-
-        labels = get_label_manager()
-        await labels.transition_to(repo, issue.id, "ag/in-progress")
-
-        reviewer = await self._resolve_reviewer(repo, issue)
-        context = {"reviewer": reviewer} if reviewer else None
-        prompt = build_prompt(issue, repo, mode="implement", context=context)
-        repo_url = f"https://github.com/{repo}.git"
-
-        launched = await self._claim_and_launch(
-            issue_id=issue.id,
-            repo_url=repo_url,
-            prompt=prompt,
-            mode="implement",
-            issue_number=issue.number,
-        )
-        if launched:
-            logger.info(f"Issue #{issue.number}: SIMPLE — launched agent")
-
-    async def _launch_unblocked(self, repo: str, issue) -> None:
-        """Launch an agent for a previously-blocked issue that got a human reply."""
-        if await self._has_active_execution(issue.id):
-            return
-
-        from ..issue_tracker.metadata import extract_metadata
-
-        labels = get_label_manager()
-        await labels.transition_to(repo, issue.id, "ag/in-progress")
-
-        # Extract human replies after the last blocking comment
-        clarification_comments = []
-        last_block_idx = None
-        for i, comment in enumerate(issue.comments):
-            meta = extract_metadata(comment.body)
-            if meta and meta.get("type") == "blocked":
-                last_block_idx = i
-
-        if last_block_idx is not None:
-            for comment in issue.comments[last_block_idx + 1 :]:
-                if extract_metadata(comment.body) is None:
-                    clarification_comments.append(comment.body)
-
-        context = {"clarification_comments": clarification_comments}
-        reviewer = await self._resolve_reviewer(repo, issue)
-        if reviewer:
-            context["reviewer"] = reviewer
-        prompt = build_prompt(issue, repo, mode="implement", context=context)
-
-        launched = await self._claim_and_launch(
-            issue_id=issue.id,
-            repo_url=f"https://github.com/{repo}.git",
-            prompt=prompt,
-            mode="implement",
-            issue_number=issue.number,
-        )
-        if launched:
-            logger.info(f"Issue #{issue.number}: UNBLOCKED — launched agent")
-
-    async def _launch_planner(self, repo: str, issue) -> None:
-        """Launch an agent to decompose a COMPLEX issue into sub-issues."""
-        if await self._has_active_execution(issue.id):
-            return
-
-        labels = get_label_manager()
-        await labels.transition_to(repo, issue.id, "ag/planning")
-
-        prompt = build_prompt(issue, repo, mode="plan")
-
-        launched = await self._claim_and_launch(
-            issue_id=issue.id,
-            repo_url=f"https://github.com/{repo}.git",
-            prompt=prompt,
-            mode="plan",
-            issue_number=issue.number,
-        )
-        if launched:
-            logger.info(f"Issue #{issue.number}: COMPLEX — launched planner agent")
-
-    async def _launch_review_handler(self, repo: str, pr_info: dict) -> None:
-        """Launch an agent to address PR review comments."""
-        issue_id = pr_info["issue_id"]
-        if await self._has_active_execution(issue_id):
-            return
-
-        issue = await self._tracker.get_issue(repo, issue_id)
-        checkpoint = await self._db.get_latest_checkpoint(issue_id)
-
-        context = {
-            "pr_number": pr_info["pr_number"],
-            "existing_branch": pr_info["branch"],
-            "review_comments": pr_info["review_comments"],
-        }
-
-        reviewer = await self._resolve_reviewer(repo, issue)
-        if reviewer:
-            context["reviewer"] = reviewer
-
-        prompt = build_prompt(issue, repo, mode="address_review", context=context, checkpoint=checkpoint)
-
-        launched = await self._claim_and_launch(
-            issue_id=issue_id,
-            repo_url=f"https://github.com/{repo}.git",
-            prompt=prompt,
-            mode="address_review",
-            issue_number=int(issue_id),
-            context=context,
-        )
-        if launched:
-            logger.info(f"PR #{pr_info['pr_number']}: launched review handler agent")
-
-    async def _launch_retry(self, repo: str, pr_info: dict) -> None:
-        """Launch a retry agent for a closed PR with feedback."""
-        issue_id = pr_info["issue_id"]
-        if await self._has_active_execution(issue_id):
-            return
-
-        issue = await self._tracker.get_issue(repo, issue_id)
-        checkpoint = await self._db.get_latest_checkpoint(issue_id)
-
-        # Check retry count
-        issue_state = await self._db.get_issue_state(int(issue_id), repo)
-        retry_count = (issue_state or {}).get("retry_count", 0)
-        if retry_count >= settings.max_retries_per_issue:
-            labels = get_label_manager()
-            await labels.transition_to(repo, issue_id, "ag/failed")
-            await self._tracker.add_comment(
-                repo,
-                issue_id,
-                f"Max retries ({settings.max_retries_per_issue}) reached. Needs human intervention.",
-            )
-            return
-
-        context = {
-            "closed_pr_number": pr_info["pr_number"],
-            "human_feedback": pr_info["human_feedback"],
-            "what_not_to_do": checkpoint.get("context_summary", "") if checkpoint else "",
-        }
-
-        reviewer = await self._resolve_reviewer(repo, issue)
-        if reviewer:
-            context["reviewer"] = reviewer
-
-        prompt = build_prompt(issue, repo, mode="retry_with_feedback", context=context, checkpoint=checkpoint)
-
-        labels = get_label_manager()
-        await labels.transition_to(repo, issue_id, "ag/in-progress")
-
-        launched = await self._claim_and_launch(
-            issue_id=issue_id,
-            repo_url=f"https://github.com/{repo}.git",
-            prompt=prompt,
-            mode="retry_with_feedback",
-            issue_number=int(issue_id),
-            context=context,
-        )
-        if launched:
-            # Increment retry count only on successful launch
-            await self._db.upsert_issue_state(
-                issue_number=int(issue_id),
-                repo=repo,
-                retry_count=retry_count + 1,
-            )
-            logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent")
-
-    async def _enrich_check_output(self, repo: str, check_info: dict) -> dict:
-        """If check_output is empty, fetch actual CI logs via job ID."""
-        if check_info.get("check_output") or not check_info.get("job_id"):
-            return check_info
-        try:
-            from ..issue_tracker.github_client import GitHubClient
-
-            tracker = get_issue_tracker()
-            if isinstance(tracker, GitHubClient):
-                logs = await tracker.get_actions_job_logs(repo, check_info["job_id"])
-                if logs:
-                    return {**check_info, "check_output": logs}
-        except Exception as e:
-            logger.warning(f"Failed to fetch CI logs for job {check_info.get('job_id')}: {e}")
-        return check_info
-
-    async def _launch_ci_fix(self, repo: str, check_info: dict) -> bool:
-        """Launch an agent to fix a failing CI check on an agent PR.
-
-        Returns True if agent was launched, False otherwise.
-        """
-        branch = check_info.get("branch", "")
-        match = re.match(r"agent/(\d+)(?:-|$)", branch)
-        if not match:
-            return False
-        issue_id = match.group(1)
-
-        if await self._has_active_execution(issue_id):
-            return False
-
-        issue = await self._tracker.get_issue(repo, issue_id)
-        checkpoint = await self._db.get_latest_checkpoint(issue_id)
-
-        context = {
-            "existing_branch": branch,
-            "pr_number": check_info.get("pr_number"),
-            "check_name": check_info.get("check_name", ""),
-            "check_output": check_info.get("check_output", ""),
-            "check_url": check_info.get("check_url", ""),
-        }
-
-        prompt = build_prompt(issue, repo, mode="fix_ci", context=context, checkpoint=checkpoint)
-
-        launched = await self._claim_and_launch(
-            issue_id=issue_id,
-            repo_url=f"https://github.com/{repo}.git",
-            prompt=prompt,
-            mode="fix_ci",
-            issue_number=int(issue_id),
-            context=context,
-        )
-        if launched:
-            logger.info(f"Issue #{issue_id}: launched CI fix agent for '{check_info.get('check_name')}'")
-        return launched
-
-    async def _run_quality_gate(
-        self,
-        repo: str,
-        issue,
-        classification,
-        is_proactive: bool,
-    ) -> str:
-        """Run the quality gate on an issue.
-
-        Returns "proceed", "blocked", or "skipped".
-        """
-        from .quality_gate import get_quality_gate
-
-        quality_gate = get_quality_gate()
-        labels = get_label_manager()
-
-        assessment = await quality_gate.evaluate(
-            issue=issue,
-            classification=classification,
-            is_proactive=is_proactive,
-        )
-
-        # Store assessment in issue_state metadata
-        # Read existing metadata first to avoid overwriting other fields
-        issue_state = await self._db.get_issue_state(issue.number, repo)
-        existing_metadata = (issue_state or {}).get("metadata") or {}
-        if isinstance(existing_metadata, str):
-            import json
-
-            existing_metadata = json.loads(existing_metadata)
-
-        updated_metadata = {
-            **existing_metadata,
-            "confidence_score": assessment.score,
-            "confidence_verdict": assessment.verdict,
-            "risk_flags": assessment.risk_flags,
-            "green_flags": assessment.green_flags,
-        }
-
-        await self._db.upsert_issue_state(
-            issue_number=issue.number,
-            repo=repo,
-            metadata=updated_metadata,
-        )
-
-        if quality_gate.should_clarify(assessment, is_proactive):
-            await labels.transition_to(repo, issue.id, "ag/blocked")
-            question = assessment.clarification_question or assessment.explanation
-            owner_tag = f"@{issue.author} " if issue.author else ""
-            comment = embed_metadata(
-                f"**Agent confidence check — needs clarification:**\n\n"
-                f"{owner_tag}{question}\n\n"
-                f"_Confidence: {assessment.score}/10. "
-                f"Risk flags: {', '.join(assessment.risk_flags)}_",
-                {"type": "blocked", "reason": f"quality_gate: {assessment.explanation}"},
-            )
-            await self._tracker.add_comment(repo, issue.id, comment)
-            logger.info(
-                f"Issue #{issue.number}: quality gate blocked "
-                f"(score={assessment.score}/10, flags={assessment.risk_flags})"
-            )
-            await self._db.record_pipeline_event(
-                issue.number,
-                repo,
-                "quality_gate",
-                "quality_gate",
-                {"score": assessment.score, "verdict": "blocked", "risk_flags": assessment.risk_flags},
-            )
-            return "blocked"
-
-        if not quality_gate.should_proceed(assessment, is_proactive):
-            if not is_proactive:
-                await labels.transition_to(repo, issue.id, "ag/skipped")
-                await self._tracker.add_comment(
-                    repo,
-                    issue.id,
-                    f"Skipping: confidence too low ({assessment.score}/10). {assessment.explanation}",
-                )
-            logger.info(f"Issue #{issue.number}: quality gate skipped (score={assessment.score}/10)")
-            await self._db.record_pipeline_event(
-                issue.number,
-                repo,
-                "quality_gate",
-                "quality_gate",
-                {"score": assessment.score, "verdict": "skipped", "is_proactive": is_proactive},
-            )
-            return "skipped"
-
-        await self._db.record_pipeline_event(
-            issue.number,
-            repo,
-            "quality_gate",
-            "quality_gate",
-            {
-                "score": assessment.score,
-                "verdict": "proceed",
-                "risk_flags": assessment.risk_flags,
-                "green_flags": assessment.green_flags,
-            },
-        )
-        return "proceed"
 
     async def _maybe_run_proactive_scan(self, repo: str) -> None:
         """Phase 8: Proactive scan — find unlabeled issues suitable for automation.
@@ -751,20 +298,15 @@ class ManagementLoop:
                 continue
 
             # Run quality gate with proactive=True (requires high score)
-            gate_result = await self._run_quality_gate(repo, issue, classification, is_proactive=True)
+            launcher = get_agent_launcher()
+            gate_result = await launcher.run_quality_gate(repo, issue, classification, is_proactive=True)
 
             if gate_result != "proceed":
                 # Mark as skipped so we don't re-evaluate next cycle
-                issue_state = await self._db.get_issue_state(issue.number, repo)
-                existing_metadata = (issue_state or {}).get("metadata") or {}
-                if isinstance(existing_metadata, str):
-                    import json
-
-                    existing_metadata = json.loads(existing_metadata)
-                await self._db.upsert_issue_state(
+                await self._db.merge_issue_metadata(
                     issue_number=issue.number,
                     repo=repo,
-                    metadata={**existing_metadata, "proactive_skipped": True},
+                    metadata_update={"proactive_skipped": True},
                 )
                 continue
 
@@ -785,23 +327,17 @@ class ManagementLoop:
             )
 
             # Mark as proactively picked
-            issue_state = await self._db.get_issue_state(issue.number, repo)
-            existing_metadata = (issue_state or {}).get("metadata") or {}
-            if isinstance(existing_metadata, str):
-                import json
-
-                existing_metadata = json.loads(existing_metadata)
-            await self._db.upsert_issue_state(
+            await self._db.merge_issue_metadata(
                 issue_number=issue.number,
                 repo=repo,
-                metadata={**existing_metadata, "proactive_picked": True},
+                metadata_update={"proactive_picked": True},
             )
 
             # Launch agent based on classification
             if classification.category == "SIMPLE":
-                await self._launch_simple(repo, issue)
+                await launcher.launch_simple(repo, issue)
             elif classification.category == "COMPLEX":
-                await self._launch_planner(repo, issue)
+                await launcher.launch_planner(repo, issue)
 
             picked_up += 1
 
@@ -908,6 +444,7 @@ class ManagementLoop:
 
         budget = get_budget_manager()
         labels = get_label_manager()
+        launcher = get_agent_launcher()
         retried = 0
 
         for issue in failed:
@@ -925,7 +462,7 @@ class ManagementLoop:
             if retry_count >= settings.max_retries_per_issue:
                 continue
 
-            if await self._has_active_execution(str(issue.number)):
+            if await launcher.has_active_execution(str(issue.number)):
                 continue
 
             # Fetch checkpoint from previous attempt if available
@@ -934,14 +471,16 @@ class ManagementLoop:
             if checkpoint:
                 context["what_not_to_do"] = checkpoint.get("context_summary", "")
 
-            reviewer = await self._resolve_reviewer(repo, issue)
+            reviewer = await launcher.resolve_reviewer(repo, issue)
             if reviewer:
                 context["reviewer"] = reviewer
+
+            from .prompt_builder import build_prompt
 
             prompt = build_prompt(issue, repo, mode="implement", context=context, checkpoint=checkpoint)
             await labels.transition_to(repo, str(issue.number), "ag/in-progress")
 
-            launched = await self._claim_and_launch(
+            launched = await launcher.claim_and_launch(
                 issue_id=str(issue.number),
                 repo_url=f"https://github.com/{repo}.git",
                 prompt=prompt,

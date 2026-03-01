@@ -106,7 +106,7 @@ class Classifier:
 
         except (json.JSONDecodeError, KeyError, IndexError) as e:
             logger.error(f"Failed to parse classification for issue #{issue.number}: {e}")
-            return Classification(category="SIMPLE", reason="Classification parse error, defaulting to SIMPLE")
+            return Classification(category="SKIP", reason="Classification parse error, defaulting to SKIP")
 
         except Exception as e:
             logger.error(f"Classification API error for issue #{issue.number}: {e}")

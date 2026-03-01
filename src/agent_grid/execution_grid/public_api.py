@@ -101,12 +101,23 @@ class ExecutionGrid(ABC):
     """Abstract interface for the execution grid service."""
 
     @abstractmethod
-    async def launch_agent(self, config: ExecutionConfig) -> UUID:
+    async def launch_agent(
+        self,
+        config: ExecutionConfig,
+        mode: str = "implement",
+        issue_number: int | None = None,
+        context: dict | None = None,
+        execution_id: UUID | None = None,
+    ) -> UUID:
         """
         Launch a generic Claude Code session.
 
         Args:
             config: Configuration for the execution (repo_url, prompt, permission_mode).
+            mode: Execution mode (implement, plan, address_review, etc.).
+            issue_number: GitHub issue number being worked on.
+            context: Additional context for the execution.
+            execution_id: Pre-assigned execution ID (for DB claim-first pattern).
 
         Returns:
             Execution ID for tracking.

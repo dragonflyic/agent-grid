@@ -173,6 +173,67 @@ class IssueTracker(ABC):
         """Close any open connections."""
         pass
 
+    # -----------------------------------------------------------------
+    # Non-abstract methods with sensible defaults.
+    # Override in concrete implementations (e.g. GitHubClient).
+    # -----------------------------------------------------------------
+
+    async def list_open_prs(self, repo: str, **params) -> list[dict]:
+        """List open pull requests. Returns raw PR dicts."""
+        return []
+
+    async def get_pr_reviews(self, repo: str, pr_number: int) -> list[dict]:
+        """Get reviews for a pull request."""
+        return []
+
+    async def get_pr_comments(self, repo: str, pr_number: int) -> list[dict]:
+        """Get inline/review comments for a pull request."""
+        return []
+
+    async def get_pr_by_branch(self, repo: str, branch: str) -> dict | None:
+        """Find an open PR for the given head branch."""
+        return None
+
+    async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
+        """Post a comment on a pull request."""
+        pass
+
+    async def request_pr_reviewers(self, repo: str, pr_number: int, reviewers: list[str]) -> None:
+        """Request reviewers on a pull request."""
+        pass
+
+    async def add_label(self, repo: str, issue_id: str, label: str) -> None:
+        """Add a label to an issue."""
+        pass
+
+    async def remove_label(self, repo: str, issue_id: str, label: str) -> None:
+        """Remove a label from an issue."""
+        pass
+
+    async def get_check_runs_for_ref(self, repo: str, ref: str, *, status: str = "completed") -> list[dict]:
+        """Return check runs for a commit SHA or branch ref."""
+        return []
+
+    async def get_actions_job_logs(self, repo: str, job_id: int) -> str:
+        """Download logs for a GitHub Actions job."""
+        return ""
+
+    async def assign_issue(self, repo: str, issue_id: str, assignee: str) -> None:
+        """Assign an issue to a user."""
+        pass
+
+    async def get_pr_data(self, repo: str, pr_number: int) -> dict | None:
+        """Fetch a single PR by number."""
+        return None
+
+    async def get_issue_comments_since(self, repo: str, issue_id: str, since: str | None = None) -> list[dict]:
+        """Fetch issue comments, optionally since a timestamp."""
+        return []
+
+    async def create_label(self, repo: str, name: str, color: str) -> bool:
+        """Create a label in the repo. Returns True if created, False if already exists."""
+        return False
+
 
 # =============================================================================
 # Service Factory

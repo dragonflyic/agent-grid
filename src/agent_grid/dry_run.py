@@ -22,10 +22,10 @@ from .execution_grid.public_api import (
     ExecutionGrid,
     ExecutionStatus,
 )
-from .issue_tracker.github_client import GitHubClient
 from .issue_tracker.public_api import (
     IssueInfo,
     IssueStatus,
+    IssueTracker,
 )
 
 logger = logging.getLogger("agent_grid.dry_run")
@@ -74,22 +74,16 @@ def get_dry_logger() -> DryRunLogger:
     return _dry_logger
 
 
-class DryRunIssueTracker(GitHubClient):
-    """Wraps a real GitHubClient. Reads pass through; writes are logged.
+class DryRunIssueTracker(IssueTracker):
+    """Wraps a real IssueTracker. Reads pass through; writes are logged.
 
-    Inherits from GitHubClient so isinstance() checks in PRMonitor,
-    BlockerResolver, and Planner pass naturally. The real GitHubClient's
-    _client (httpx) is exposed for direct read-only API calls.
+    Uses the IssueTracker ABC directly — no isinstance checks needed.
     """
 
-    def __init__(self, real: GitHubClient):
-        # Skip GitHubClient.__init__ — we delegate to the real instance
+    def __init__(self, real: IssueTracker):
         self._real = real
         self._log = get_dry_logger()
         self._fake_issue_counter = 90000
-        # Expose _client for PRMonitor and other code that reads via _client directly
-        self._client = real._client
-        self._token = real._token
 
     # ---- READS (pass through) ----
 
@@ -106,6 +100,30 @@ class DryRunIssueTracker(GitHubClient):
         labels: list[str] | None = None,
     ) -> list[IssueInfo]:
         return await self._real.list_issues(repo, status=status, labels=labels)
+
+    async def list_open_prs(self, repo: str, **params) -> list[dict]:
+        return await self._real.list_open_prs(repo, **params)
+
+    async def get_pr_reviews(self, repo: str, pr_number: int) -> list[dict]:
+        return await self._real.get_pr_reviews(repo, pr_number)
+
+    async def get_pr_comments(self, repo: str, pr_number: int) -> list[dict]:
+        return await self._real.get_pr_comments(repo, pr_number)
+
+    async def get_pr_by_branch(self, repo: str, branch: str) -> dict | None:
+        return await self._real.get_pr_by_branch(repo, branch)
+
+    async def get_pr_data(self, repo: str, pr_number: int) -> dict | None:
+        return await self._real.get_pr_data(repo, pr_number)
+
+    async def get_issue_comments_since(self, repo: str, issue_id: str, since: str | None = None) -> list[dict]:
+        return await self._real.get_issue_comments_since(repo, issue_id, since=since)
+
+    async def get_check_runs_for_ref(self, repo: str, ref: str, *, status: str = "completed") -> list[dict]:
+        return await self._real.get_check_runs_for_ref(repo, ref, status=status)
+
+    async def get_actions_job_logs(self, repo: str, job_id: int) -> str:
+        return await self._real.get_actions_job_logs(repo, job_id)
 
     # ---- WRITES (intercepted) ----
 
@@ -128,7 +146,6 @@ class DryRunIssueTracker(GitHubClient):
             labels=labels,
             fake_number=fake_number,
         )
-        # Return a fake IssueInfo so the rest of the pipeline can continue
         return IssueInfo(
             id=str(fake_number),
             number=fake_number,
@@ -142,26 +159,20 @@ class DryRunIssueTracker(GitHubClient):
         )
 
     async def add_comment(self, repo: str, issue_id: str, body: str) -> None:
-        self._log.log(
-            "add_comment",
-            repo=repo,
-            issue_id=issue_id,
-            body=body[:500],
-        )
+        self._log.log("add_comment", repo=repo, issue_id=issue_id, body=body[:500])
 
     async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
-        self._log.log(
-            "update_issue_status",
-            repo=repo,
-            issue_id=issue_id,
-            status=status.value,
-        )
+        self._log.log("update_issue_status", repo=repo, issue_id=issue_id, status=status.value)
 
-    async def _add_label(self, repo: str, issue_id: str, label: str) -> None:
-        self._log.log("_add_label", repo=repo, issue_id=issue_id, label=label)
+    async def add_label(self, repo: str, issue_id: str, label: str) -> None:
+        self._log.log("add_label", repo=repo, issue_id=issue_id, label=label)
 
-    async def _remove_label(self, repo: str, issue_id: str, label: str) -> None:
-        self._log.log("_remove_label", repo=repo, issue_id=issue_id, label=label)
+    async def remove_label(self, repo: str, issue_id: str, label: str) -> None:
+        self._log.log("remove_label", repo=repo, issue_id=issue_id, label=label)
+
+    async def create_label(self, repo: str, name: str, color: str) -> bool:
+        self._log.log("create_label", repo=repo, name=name, color=color)
+        return True
 
     async def assign_issue(self, repo: str, issue_id: str, assignee: str) -> None:
         self._log.log("assign_issue", repo=repo, issue_id=issue_id, assignee=assignee)
@@ -242,6 +253,13 @@ class DryRunDatabase:
 
     async def get_issue_state(self, issue_number: int, repo: str) -> dict | None:
         return self._issue_states.get((issue_number, repo))
+
+    async def merge_issue_metadata(self, issue_number: int, repo: str, metadata_update: dict) -> None:
+        key = (issue_number, repo)
+        if key not in self._issue_states:
+            self._issue_states[key] = {"issue_number": issue_number, "repo": repo, "retry_count": 0, "metadata": {}}
+        existing = self._issue_states[key].get("metadata") or {}
+        self._issue_states[key]["metadata"] = {**existing, **metadata_update}
 
     async def get_cron_state(self, key: str) -> dict | None:
         return self._cron_state.get(key)
@@ -572,6 +590,7 @@ def install_dry_run_wrappers() -> None:
 
     # Reset service singletons that cache references to the real tracker/labels
     # so they pick up the dry-run wrappers when re-initialized
+    import agent_grid.coordinator.agent_launcher as launcher_mod
     import agent_grid.coordinator.blocker_resolver as blocker_mod
     import agent_grid.coordinator.budget_manager as budget_mod
     import agent_grid.coordinator.ci_monitor as ci_monitor_mod
@@ -583,6 +602,7 @@ def install_dry_run_wrappers() -> None:
     import agent_grid.coordinator.scanner as scanner_mod
     import agent_grid.issue_tracker.project_manager as project_mod
 
+    launcher_mod._agent_launcher = None
     ci_monitor_mod._ci_monitor = None
     project_mod._project_manager = None
     settings.github_project_number = None  # Disable Projects in dry-run

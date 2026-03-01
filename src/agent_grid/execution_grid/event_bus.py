@@ -22,6 +22,8 @@ class EventBus:
         self._subscribers: dict[EventType | None, list[Callable[[Event], Awaitable[None]]]] = {}
         self._running = False
         self._consumer_task: asyncio.Task | None = None
+        self.dropped_count: int = 0
+        self._consecutive_errors: int = 0
 
     async def publish(self, event_type: EventType, payload: dict | None = None) -> None:
         """Publish an event to the bus."""
@@ -33,7 +35,11 @@ class EventBus:
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
-            logger.error(f"Event bus queue full ({self._queue.maxsize}), dropping event: {event_type}")
+            self.dropped_count += 1
+            logger.warning(
+                f"Event bus queue full ({self._queue.maxsize}), "
+                f"dropped {event_type.value} (total dropped: {self.dropped_count})"
+            )
 
     def subscribe(
         self,
@@ -92,8 +98,13 @@ class EventBus:
                 event = await asyncio.wait_for(self._queue.get(), timeout=1.0)
                 try:
                     await self._dispatch(event)
+                    self._consecutive_errors = 0
                 except Exception:
                     logger.exception(f"Error dispatching event {event.type}")
+                    self._consecutive_errors += 1
+                    backoff = min(2**self._consecutive_errors, 30)
+                    logger.warning(f"Event bus backoff: {backoff}s after {self._consecutive_errors} consecutive errors")
+                    await asyncio.sleep(backoff)
                 finally:
                     self._queue.task_done()
             except asyncio.TimeoutError:

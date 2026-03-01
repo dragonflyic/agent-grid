@@ -5,9 +5,6 @@ Manages ag/* labels on GitHub issues to track pipeline state.
 
 import logging
 
-import httpx
-
-from .github_client import GitHubClient
 from .project_manager import get_project_manager
 from .public_api import get_issue_tracker
 
@@ -33,22 +30,19 @@ class LabelManager:
     """Manages label transitions on GitHub issues."""
 
     def __init__(self):
-        tracker = get_issue_tracker()
-        if not isinstance(tracker, GitHubClient):
-            raise TypeError("LabelManager requires GitHubClient")
-        self._github = tracker
+        self._tracker = get_issue_tracker()
 
     async def transition_to(self, repo: str, issue_id: str, new_label: str) -> None:
         """Remove all ag/* labels and add the new one."""
-        issue = await self._github.get_issue(repo, issue_id)
+        issue = await self._tracker.get_issue(repo, issue_id)
         current_ag_labels = [label for label in issue.labels if label in AG_LABELS]
 
         for label in current_ag_labels:
             if label != new_label:
-                await self._github._remove_label(repo, issue_id, label)
+                await self._tracker.remove_label(repo, issue_id, label)
 
         if new_label not in current_ag_labels:
-            await self._github._add_label(repo, issue_id, new_label)
+            await self._tracker.add_label(repo, issue_id, new_label)
 
         # Sync to GitHub Projects board (no-op if unconfigured)
         try:
@@ -61,11 +55,11 @@ class LabelManager:
 
     async def add_label(self, repo: str, issue_id: str, label: str) -> None:
         """Add a label without removing others."""
-        await self._github._add_label(repo, issue_id, label)
+        await self._tracker.add_label(repo, issue_id, label)
 
     async def remove_label(self, repo: str, issue_id: str, label: str) -> None:
         """Remove a specific label."""
-        await self._github._remove_label(repo, issue_id, label)
+        await self._tracker.remove_label(repo, issue_id, label)
 
     async def ensure_labels_exist(self, repo: str) -> None:
         """Create all ag/* labels in the repo if they don't exist."""
@@ -84,19 +78,7 @@ class LabelManager:
             "ag/proactive": "7057ff",
         }
         for label, color in label_colors.items():
-            try:
-                resp = await self._github._client.post(
-                    f"/repos/{repo}/labels",
-                    json={"name": label, "color": color},
-                )
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 422:
-                    pass  # Label already exists
-                else:
-                    logger.warning(f"Failed to create label {label}: {e.response.status_code}")
-            except Exception as e:
-                logger.error(f"Error creating label {label}: {e}")
+            await self._tracker.create_label(repo, label, color)
 
 
 _label_manager: LabelManager | None = None

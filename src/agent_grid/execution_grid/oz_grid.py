@@ -2,11 +2,16 @@
 
 Replaces Fly Machines-based grid. Submits agent runs to Oz via the SDK
 and polls for completion instead of relying on HTTP callbacks.
+
+Layer discipline: this module does NOT import from coordinator or issue_tracker.
+All DB persistence and fallback PR detection are handled via injectable callbacks
+wired during application startup.
 """
 
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 from uuid import UUID, uuid4
 
@@ -29,6 +34,43 @@ logger = logging.getLogger("agent_grid.oz_grid")
 _TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELLED"}
 
 
+# ---------------------------------------------------------------------------
+# Callback type definitions
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RunArtifacts:
+    """PR artifacts extracted from a completed Oz run."""
+
+    branch: str | None = None
+    pr_url: str | None = None
+    pr_number: int | None = None
+    result: str | None = None
+    cost_cents: int | None = None
+
+
+@dataclass
+class OzCallbacks:
+    """Injectable callbacks for cross-layer operations.
+
+    Set via `OzExecutionGrid.set_callbacks()` during startup.
+    All callbacks are optional — if not set, the operation is skipped.
+    """
+
+    # Called after a run is created: (execution_id, oz_run_id, session_link)
+    on_run_created: Callable[[UUID, str, str | None], Awaitable[None]] | None = None
+
+    # Called to recover in-flight runs on startup: () -> list[(exec_id, run_id)]
+    recover_runs: Callable[[], Awaitable[list[tuple[UUID, str]]]] | None = None
+
+    # Called when a run succeeds: (exec_id, artifacts) -> updated artifacts
+    on_run_succeeded: Callable[[UUID, RunArtifacts], Awaitable[RunArtifacts]] | None = None
+
+    # Called when a run fails: (exec_id, error_message)
+    on_run_failed: Callable[[UUID, str], Awaitable[None]] | None = None
+
+
 class OzExecutionGrid(ExecutionGrid):
     """Warp Oz-based execution grid.
 
@@ -43,10 +85,15 @@ class OzExecutionGrid(ExecutionGrid):
         self._client = AsyncOzAPI(api_key=settings.warp_api_key or None)
         self._executions: dict[UUID, AgentExecution] = {}
         self._run_map: dict[UUID, str] = {}  # execution_id -> oz_run_id
-        self._handler_mapping: dict[int, Callable[[Event], Awaitable[None]]] = {}
+        self._handler_mapping: dict[AgentEventHandler, Callable[[Event], Awaitable[None]]] = {}
         self._poll_task: asyncio.Task | None = None
         self._polling = False
         self._poll_errors: dict[UUID, int] = {}  # consecutive poll failures per execution
+        self._callbacks = OzCallbacks()
+
+    def set_callbacks(self, callbacks: OzCallbacks) -> None:
+        """Set callbacks for cross-layer operations (DB, PR detection, etc)."""
+        self._callbacks = callbacks
 
     async def launch_agent(
         self,
@@ -84,17 +131,13 @@ class OzExecutionGrid(ExecutionGrid):
 
             self._run_map[execution_id] = response.run_id
 
-            # Persist oz_run_id and session_link to DB
-            try:
-                from ..coordinator.database import get_database
-
-                db = get_database()
-                await db.set_external_run_id(execution_id, response.run_id)
-                session_link = getattr(response, "session_link", None)
-                if session_link:
-                    await db.set_session_link(execution_id, session_link)
-            except Exception as e:
-                logger.warning(f"Failed to persist oz_run_id to DB: {e}")
+            # Persist oz_run_id and session_link via callback
+            if self._callbacks.on_run_created:
+                try:
+                    session_link = getattr(response, "session_link", None)
+                    await self._callbacks.on_run_created(execution_id, response.run_id, session_link)
+                except Exception as e:
+                    logger.warning(f"on_run_created callback failed: {e}")
 
             await event_bus.publish(
                 EventType.AGENT_STARTED,
@@ -119,25 +162,23 @@ class OzExecutionGrid(ExecutionGrid):
     async def start_polling(self) -> None:
         """Start the background polling loop for run completion.
 
-        Also recovers in-flight Oz runs from the database so that runs
+        Also recovers in-flight Oz runs via callback so that runs
         launched before a process restart are still tracked.
         """
         if self._polling:
             return
 
-        # Recover in-flight runs from DB
-        try:
-            from ..coordinator.database import get_database
-
-            db = get_database()
-            active_runs = await db.get_active_executions_with_external_run_id()
-            for exec_id, run_id in active_runs:
-                if exec_id not in self._run_map:
-                    self._run_map[exec_id] = run_id
-            if active_runs:
-                logger.info(f"Recovered {len(active_runs)} in-flight Oz runs from DB")
-        except Exception as e:
-            logger.warning(f"Failed to recover Oz runs from DB: {e}")
+        # Recover in-flight runs via callback
+        if self._callbacks.recover_runs:
+            try:
+                active_runs = await self._callbacks.recover_runs()
+                for exec_id, run_id in active_runs:
+                    if exec_id not in self._run_map:
+                        self._run_map[exec_id] = run_id
+                if active_runs:
+                    logger.info(f"Recovered {len(active_runs)} in-flight Oz runs")
+            except Exception as e:
+                logger.warning(f"Failed to recover Oz runs: {e}")
 
         self._polling = True
         self._poll_task = asyncio.create_task(self._poll_loop())
@@ -185,110 +226,50 @@ class OzExecutionGrid(ExecutionGrid):
                     continue
 
                 # Extract PR artifact if present
-                branch = None
-                pr_url = None
-                pr_number = None
+                artifacts = RunArtifacts()
                 if run.artifacts:
                     for artifact in run.artifacts:
                         if artifact.artifact_type == "PULL_REQUEST":
-                            branch = artifact.data.branch
-                            pr_url = artifact.data.url
-                            # Extract PR number from URL (e.g. .../pull/123)
-                            pr_match = re.search(r"/pull/(\d+)", pr_url or "")
+                            artifacts.branch = artifact.data.branch
+                            artifacts.pr_url = artifact.data.url
+                            pr_match = re.search(r"/pull/(\d+)", artifacts.pr_url or "")
                             if pr_match:
-                                pr_number = int(pr_match.group(1))
+                                artifacts.pr_number = int(pr_match.group(1))
                             break
 
-                # Build result summary
-                result = run.status_message.message if run.status_message else None
-
-                # Fallback PR detection when Oz didn't provide a PR artifact
-                if run.state == "SUCCEEDED" and pr_number is None:
-                    try:
-                        from ..coordinator.database import get_database as _get_db_fb
-                        from ..issue_tracker import get_issue_tracker
-                        from ..issue_tracker.github_client import GitHubClient
-
-                        _tracker = get_issue_tracker()
-                        if isinstance(_tracker, GitHubClient):
-                            _issue_id = await _get_db_fb().get_issue_id_for_execution(exec_id)
-                            if _issue_id:
-                                _exec = self._executions.get(exec_id)
-                                _repo = (
-                                    _exec.repo_url.replace("https://github.com/", "").rstrip(".git")
-                                    if _exec and _exec.repo_url
-                                    else None
-                                )
-                                if _repo:
-                                    for _candidate in (
-                                        f"agent/{_issue_id}",
-                                        f"agent/{_issue_id}-retry",
-                                    ):
-                                        _pr = await _tracker.get_pr_by_branch(_repo, _candidate)
-                                        if _pr:
-                                            pr_number = _pr["number"]
-                                            branch = _candidate
-                                            pr_url = _pr.get("html_url")
-                                            logger.info(
-                                                f"Fallback: found PR #{pr_number} on branch "
-                                                f"{branch} for execution {exec_id}"
-                                            )
-                                            break
-                    except Exception as _e:
-                        logger.warning(f"Fallback PR detection failed for {exec_id}: {_e}")
+                artifacts.result = run.status_message.message if run.status_message else None
 
                 # Capture cost from request_usage
                 request_usage = getattr(run, "request_usage", None)
                 if request_usage:
-                    try:
-                        from ..coordinator.database import get_database as _get_db
-
-                        compute = getattr(request_usage, "compute_cost", 0) or 0
-                        inference = getattr(request_usage, "inference_cost", 0) or 0
-                        total = compute + inference
-                        if total > 0:
-                            await _get_db().set_cost(exec_id, int(total * 100))
-                    except Exception as e:
-                        logger.warning(f"Failed to persist cost for {exec_id}: {e}")
-
-                # Update DB directly before publishing event — ensures DB is
-                # consistent even if the async event handler fails or drops the event.
-                try:
-                    from ..coordinator.database import get_database as _get_db
-
-                    db = _get_db()
-                    if run.state == "SUCCEEDED":
-                        await db.update_execution_result(
-                            execution_id=exec_id,
-                            status=ExecutionStatus.COMPLETED,
-                            result=result,
-                            pr_number=pr_number,
-                            branch=branch,
-                        )
-                    else:
-                        await db.update_execution_result(
-                            execution_id=exec_id,
-                            status=ExecutionStatus.FAILED,
-                            result=result or f"Run {run.state.lower()}",
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to update DB for execution {exec_id}: {e}")
+                    compute = getattr(request_usage, "compute_cost", 0) or 0
+                    inference = getattr(request_usage, "inference_cost", 0) or 0
+                    total = compute + inference
+                    if total > 0:
+                        artifacts.cost_cents = int(total * 100)
 
                 if run.state == "SUCCEEDED":
+                    # Let the callback handle DB updates, fallback PR detection, cost
+                    if self._callbacks.on_run_succeeded:
+                        try:
+                            artifacts = await self._callbacks.on_run_succeeded(exec_id, artifacts)
+                        except Exception as e:
+                            logger.warning(f"on_run_succeeded callback failed for {exec_id}: {e}")
+
                     execution = self._executions.get(exec_id)
                     if execution:
                         execution.status = ExecutionStatus.COMPLETED
                         execution.completed_at = utc_now()
-                        execution.result = result
+                        execution.result = artifacts.result
 
                     await event_bus.publish(
                         EventType.AGENT_COMPLETED,
                         {
                             "execution_id": str(exec_id),
-                            "result": result,
-                            "branch": branch,
-                            "pr_number": pr_number,
-                            "pr_url": pr_url,
+                            "result": artifacts.result,
+                            "branch": artifacts.branch,
+                            "pr_number": artifacts.pr_number,
+                            "pr_url": artifacts.pr_url,
                             "oz_run_id": run_id,
                         },
                     )
@@ -296,17 +277,25 @@ class OzExecutionGrid(ExecutionGrid):
 
                 else:
                     # FAILED or CANCELLED
+                    error_msg = artifacts.result or f"Run {run.state.lower()}"
+
+                    if self._callbacks.on_run_failed:
+                        try:
+                            await self._callbacks.on_run_failed(exec_id, error_msg)
+                        except Exception as e:
+                            logger.warning(f"on_run_failed callback failed for {exec_id}: {e}")
+
                     execution = self._executions.get(exec_id)
                     if execution:
                         execution.status = ExecutionStatus.FAILED
                         execution.completed_at = utc_now()
-                        execution.result = result or f"Run {run.state.lower()}"
+                        execution.result = error_msg
 
                     await event_bus.publish(
                         EventType.AGENT_FAILED,
                         {
                             "execution_id": str(exec_id),
-                            "error": result or f"Run {run.state.lower()}",
+                            "error": error_msg,
                             "oz_run_id": run_id,
                         },
                     )
@@ -363,11 +352,11 @@ class OzExecutionGrid(ExecutionGrid):
         async def event_handler(event: Event) -> None:
             await handler(event.type.value, event.payload)
 
-        self._handler_mapping[id(handler)] = event_handler
+        self._handler_mapping[handler] = event_handler
         event_bus.subscribe(event_handler, event_type=None)
 
     def unsubscribe_from_agent_events(self, handler: AgentEventHandler) -> None:
-        event_handler = self._handler_mapping.pop(id(handler), None)
+        event_handler = self._handler_mapping.pop(handler, None)
         if event_handler:
             event_bus.unsubscribe(event_handler, event_type=None)
 

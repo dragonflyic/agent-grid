@@ -31,9 +31,16 @@ class ExecutionGridService(ExecutionGrid):
         # Map handler IDs to internal event handlers for cleanup
         self._handler_mapping: dict[int, Callable[[Event], Awaitable[None]]] = {}
 
-    async def launch_agent(self, config: ExecutionConfig) -> UUID:
+    async def launch_agent(
+        self,
+        config: ExecutionConfig,
+        mode: str = "implement",
+        issue_number: int | None = None,
+        context: dict | None = None,
+        execution_id: UUID | None = None,
+    ) -> UUID:
         """Launch a generic Claude Code session."""
-        execution_id = uuid4()
+        execution_id = execution_id or uuid4()
         execution = AgentExecution(
             id=execution_id,
             repo_url=config.repo_url,
@@ -65,12 +72,12 @@ class ExecutionGridService(ExecutionGrid):
             await handler(event.type.value, event.payload)
 
         # Store mapping for later unsubscription
-        self._handler_mapping[id(handler)] = event_handler
+        self._handler_mapping[handler] = event_handler
         event_bus.subscribe(event_handler, event_type=None)
 
     def unsubscribe_from_agent_events(self, handler: AgentEventHandler) -> None:
         """Unsubscribe from agent events."""
-        event_handler = self._handler_mapping.pop(id(handler), None)
+        event_handler = self._handler_mapping.pop(handler, None)
         if event_handler:
             event_bus.unsubscribe(event_handler, event_type=None)
 

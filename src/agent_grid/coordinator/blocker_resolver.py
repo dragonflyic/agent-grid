@@ -32,11 +32,6 @@ class BlockerResolver:
 
         Returns list of IssueInfo objects that were unblocked (with comments).
         """
-        from ..issue_tracker.github_client import GitHubClient
-
-        if not isinstance(self._tracker, GitHubClient):
-            return []
-
         # list_issues doesn't fetch comments, so we get IDs first
         blocked_issues = await self._tracker.list_issues(
             repo,

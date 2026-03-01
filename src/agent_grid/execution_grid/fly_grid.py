@@ -167,11 +167,11 @@ class FlyExecutionGrid(ExecutionGrid):
         async def event_handler(event: Event) -> None:
             await handler(event.type.value, event.payload)
 
-        self._handler_mapping[id(handler)] = event_handler
+        self._handler_mapping[handler] = event_handler
         event_bus.subscribe(event_handler, event_type=None)
 
     def unsubscribe_from_agent_events(self, handler: AgentEventHandler) -> None:
-        event_handler = self._handler_mapping.pop(id(handler), None)
+        event_handler = self._handler_mapping.pop(handler, None)
         if event_handler:
             event_bus.unsubscribe(event_handler, event_type=None)
 

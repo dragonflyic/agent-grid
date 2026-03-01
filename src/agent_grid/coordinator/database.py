@@ -380,6 +380,36 @@ class Database:
                 for m in result.scalars().all()
             ]
 
+    async def merge_issue_metadata(
+        self,
+        issue_number: int,
+        repo: str,
+        metadata_update: dict,
+    ) -> None:
+        """Atomically merge keys into issue_state metadata using server-side JSON merge.
+
+        Unlike upsert_issue_state (which replaces the entire metadata object),
+        this merges the provided keys into the existing metadata without a
+        read-modify-write cycle, eliminating race conditions.
+        """
+        import json as json_mod
+
+        async with self._session() as session:
+            await session.execute(
+                text("""
+                    UPDATE issue_state
+                    SET metadata = COALESCE(metadata::jsonb, '{}'::jsonb) || :new_metadata::jsonb,
+                        updated_at = NOW()
+                    WHERE issue_number = :issue_number AND repo = :repo
+                """),
+                {
+                    "issue_number": issue_number,
+                    "repo": repo,
+                    "new_metadata": json_mod.dumps(metadata_update),
+                },
+            )
+            await session.commit()
+
     # -------------------------------------------------------------------------
     # Checkpoint operations
     # -------------------------------------------------------------------------
