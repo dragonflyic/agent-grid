@@ -62,7 +62,7 @@ Issue #{issue.number}: {issue.title}
    - Otherwise, manually:
      - Push your branch
      - Create PR with proper fields set:
-       gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/in-progress"{reviewer_flag}
+       gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/review-pending"{reviewer_flag}
    - **EXIT immediately after the PR is created.** Do not continue working.
      Your job is done once the PR exists. CI will run automatically.
 
@@ -296,7 +296,7 @@ git checkout -b {new_branch}
 After implementation, push and create a PR with proper fields:
 ```bash
 git push -u origin {new_branch}
-gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/in-progress"{reviewer_flag}
+gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/review-pending"{reviewer_flag}
 ```
 
 **EXIT immediately after the PR is created.** Your job is done. CI will run automatically.

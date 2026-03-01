@@ -452,7 +452,7 @@ class TestPRCreationPrompt:
         from agent_grid.coordinator.prompt_builder import build_prompt
 
         prompt = build_prompt(self._make_issue(), "owner/repo", mode="implement")
-        assert '--label "ag/in-progress"' in prompt
+        assert '--label "ag/review-pending"' in prompt
 
     def test_retry_prompt_includes_reviewer_flag(self):
         """Retry mode gh pr create should also include --reviewer."""
@@ -476,7 +476,7 @@ class TestPRCreationPrompt:
             mode="retry_with_feedback",
             context={"closed_pr_number": 3, "human_feedback": "wrong"},
         )
-        assert '--label "ag/in-progress"' in prompt
+        assert '--label "ag/review-pending"' in prompt
 
     def test_no_cc_author_in_body(self):
         """PR body should not contain 'cc @author' — use --reviewer instead."""
