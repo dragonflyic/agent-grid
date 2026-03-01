@@ -746,20 +746,24 @@ class Database:
         branch: str | None = None,
         checkpoint: dict | None = None,
     ) -> None:
-        """Update execution with result details."""
+        """Update execution with result details.
+
+        Only overwrites pr_number, branch, and checkpoint when a non-None
+        value is provided — avoids clobbering data written by an earlier call.
+        """
+        values: dict = {
+            "status": status.value,
+            "result": result,
+            "completed_at": func.now(),
+        }
+        if pr_number is not None:
+            values["pr_number"] = pr_number
+        if branch is not None:
+            values["branch"] = branch
+        if checkpoint is not None:
+            values["checkpoint"] = checkpoint
         async with self._session() as session:
-            await session.execute(
-                update(ExecutionModel)
-                .where(ExecutionModel.id == execution_id)
-                .values(
-                    status=status.value,
-                    result=result,
-                    pr_number=pr_number,
-                    branch=branch,
-                    checkpoint=checkpoint,  # SQLAlchemy JSON type handles serialization
-                    completed_at=func.now(),
-                )
-            )
+            await session.execute(update(ExecutionModel).where(ExecutionModel.id == execution_id).values(**values))
             await session.commit()
 
 

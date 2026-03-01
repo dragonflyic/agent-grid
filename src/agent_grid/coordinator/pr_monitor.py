@@ -73,6 +73,7 @@ class PRMonitor:
                 continue
 
             pr_number = pr["number"]
+            pr_author = pr.get("user", {}).get("login", "")
 
             # Fetch review comments
             try:
@@ -93,9 +94,13 @@ class PRMonitor:
                 logger.error(f"Failed to fetch reviews for PR #{pr_number}: {e}")
                 continue
 
-            # Filter for new comments since last check
+            # Filter for new human comments since last check
+            # Skip bot comments and self-comments (agent reviewing its own PR)
             new_reviews = []
             for review in reviews:
+                reviewer = review.get("user", {})
+                if reviewer.get("type") == "Bot" or reviewer.get("login") == pr_author:
+                    continue
                 is_actionable = review.get("state") in ("CHANGES_REQUESTED", "COMMENTED")
                 if is_actionable and review.get("body"):
                     submitted = _normalize_timestamp(review.get("submitted_at", ""))
@@ -104,6 +109,9 @@ class PRMonitor:
 
             new_comments = []
             for comment in pr_comments:
+                commenter = comment.get("user", {})
+                if commenter.get("type") == "Bot" or commenter.get("login") == pr_author:
+                    continue
                 created = _normalize_timestamp(comment.get("created_at", ""))
                 if not last_check or created > _normalize_timestamp(last_check):
                     path = comment.get("path", "")

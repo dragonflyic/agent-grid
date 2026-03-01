@@ -161,10 +161,21 @@ class ManagementLoop:
 
         # Phase 5: Monitor PRs for review comments
         pr_monitor = get_pr_monitor()
-        prs_needing_work = await pr_monitor.check_prs(repo)
-        for pr_info in prs_needing_work:
-            if pr_info["issue_id"]:
-                await self._launch_review_handler(repo, pr_info)
+        prs_raw = await pr_monitor.check_prs(repo)
+        # Dedup by issue_id — merge review_comments for the same issue
+        seen_pr_issues: dict[str, dict] = {}
+        for pr_info in prs_raw:
+            iid = pr_info.get("issue_id")
+            if not iid:
+                continue
+            if iid in seen_pr_issues:
+                extra = pr_info.get("review_comments", "")
+                if extra and extra not in seen_pr_issues[iid].get("review_comments", ""):
+                    seen_pr_issues[iid]["review_comments"] += "\n\n---\n\n" + extra
+            else:
+                seen_pr_issues[iid] = dict(pr_info)
+        for pr_info in seen_pr_issues.values():
+            await self._launch_review_handler(repo, pr_info)
 
         # Phase 6: Monitor closed PRs with feedback
         closed_prs = await pr_monitor.check_closed_prs(repo)

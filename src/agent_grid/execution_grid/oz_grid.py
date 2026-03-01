@@ -202,6 +202,41 @@ class OzExecutionGrid(ExecutionGrid):
                 # Build result summary
                 result = run.status_message.message if run.status_message else None
 
+                # Fallback PR detection when Oz didn't provide a PR artifact
+                if run.state == "SUCCEEDED" and pr_number is None:
+                    try:
+                        from ..coordinator.database import get_database as _get_db_fb
+                        from ..issue_tracker import get_issue_tracker
+                        from ..issue_tracker.github_client import GitHubClient
+
+                        _tracker = get_issue_tracker()
+                        if isinstance(_tracker, GitHubClient):
+                            _issue_id = await _get_db_fb().get_issue_id_for_execution(exec_id)
+                            if _issue_id:
+                                _exec = self._executions.get(exec_id)
+                                _repo = (
+                                    _exec.repo_url.replace("https://github.com/", "").rstrip(".git")
+                                    if _exec and _exec.repo_url
+                                    else None
+                                )
+                                if _repo:
+                                    for _candidate in (
+                                        f"agent/{_issue_id}",
+                                        f"agent/{_issue_id}-retry",
+                                    ):
+                                        _pr = await _tracker.get_pr_by_branch(_repo, _candidate)
+                                        if _pr:
+                                            pr_number = _pr["number"]
+                                            branch = _candidate
+                                            pr_url = _pr.get("html_url")
+                                            logger.info(
+                                                f"Fallback: found PR #{pr_number} on branch "
+                                                f"{branch} for execution {exec_id}"
+                                            )
+                                            break
+                    except Exception as _e:
+                        logger.warning(f"Fallback PR detection failed for {exec_id}: {_e}")
+
                 # Capture cost from request_usage
                 request_usage = getattr(run, "request_usage", None)
                 if request_usage:
