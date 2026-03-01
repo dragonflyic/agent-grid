@@ -855,6 +855,10 @@ class ManagementLoop:
         retried = 0
 
         for issue in failed:
+            if retried >= settings.max_auto_retries_per_cycle:
+                logger.info(f"Auto-retry: per-cycle cap ({settings.max_auto_retries_per_cycle}) reached, stopping")
+                break
+
             can_launch, reason = await budget.can_launch_agent()
             if not can_launch:
                 logger.info(f"Auto-retry: budget limit reached ({reason}), stopping")

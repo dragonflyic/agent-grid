@@ -826,6 +826,7 @@ class TestAutoRetryFailed:
             patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
         ):
             mock_settings.max_retries_per_issue = 2
+            mock_settings.max_auto_retries_per_cycle = 10
             await loop._auto_retry_failed("owner/repo")
 
         # Should transition to in-progress then launch
@@ -874,6 +875,7 @@ class TestAutoRetryFailed:
             patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
         ):
             mock_settings.max_retries_per_issue = 2
+            mock_settings.max_auto_retries_per_cycle = 10
             await loop._auto_retry_failed("owner/repo")
 
         mock_labels.transition_to.assert_not_called()
@@ -913,6 +915,7 @@ class TestAutoRetryFailed:
             patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
         ):
             mock_settings.max_retries_per_issue = 2
+            mock_settings.max_auto_retries_per_cycle = 10
             await loop._auto_retry_failed("owner/repo")
 
         # Should not attempt to launch
