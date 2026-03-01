@@ -37,7 +37,7 @@ class FlyExecutionGrid(ExecutionGrid):
         self._fly = get_fly_client()
         self._executions: dict[UUID, AgentExecution] = {}
         self._machine_map: dict[UUID, str] = {}  # execution_id -> machine_id
-        self._handler_mapping: dict[int, Callable[[Event], Awaitable[None]]] = {}
+        self._handler_mapping: dict[AgentEventHandler, Callable[[Event], Awaitable[None]]] = {}
 
     async def launch_agent(
         self,
