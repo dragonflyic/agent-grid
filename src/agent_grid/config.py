@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     oz_environment_id: str = ""
     oz_model_id: str = "claude-sonnet-4-5-20250929"
     oz_poll_interval_seconds: int = 30  # How often to poll Oz for run completion
+    max_oz_runs_per_day: int = 20  # Hard cap on Oz runs per day (cost control)
 
     # Fly.io configuration (used when execution_backend="fly")
     fly_api_token: str = ""
