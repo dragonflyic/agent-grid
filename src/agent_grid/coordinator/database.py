@@ -1,6 +1,6 @@
 """PostgreSQL database access for coordinator using SQLAlchemy 2.0 async ORM."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select, text, update
@@ -287,6 +287,20 @@ class Database:
                 "tokens_used": row.tokens,
                 "duration_seconds": row.duration,
             }
+
+    async def count_oz_runs_today(self) -> int:
+        """Count executions launched via Oz (external_run_id set) since midnight UTC."""
+        async with self._session() as session:
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            result = await session.execute(
+                select(func.count())
+                .select_from(ExecutionModel)
+                .where(
+                    ExecutionModel.external_run_id.isnot(None),
+                    ExecutionModel.created_at >= today_start,
+                )
+            )
+            return result.scalar_one()
 
     # -------------------------------------------------------------------------
     # Issue state operations

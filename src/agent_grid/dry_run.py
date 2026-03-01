@@ -321,6 +321,9 @@ class DryRunDatabase:
     async def get_total_budget_usage(self, **kwargs) -> dict:
         return {"tokens_used": 0, "duration_seconds": 0}
 
+    async def count_oz_runs_today(self) -> int:
+        return 0
+
     # Pipeline events (audit trail)
 
     async def record_pipeline_event(
