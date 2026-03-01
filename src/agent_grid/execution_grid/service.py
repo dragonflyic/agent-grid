@@ -29,7 +29,7 @@ class ExecutionGridService(ExecutionGrid):
     def __init__(self):
         self._agent_runner = get_agent_runner()
         # Map handler IDs to internal event handlers for cleanup
-        self._handler_mapping: dict[int, Callable[[Event], Awaitable[None]]] = {}
+        self._handler_mapping: dict[AgentEventHandler, Callable[[Event], Awaitable[None]]] = {}
 
     async def launch_agent(
         self,
