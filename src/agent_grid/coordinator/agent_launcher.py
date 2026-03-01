@@ -158,6 +158,8 @@ class AgentLauncher:
         )
         if launched:
             logger.info(f"Issue #{issue.number}: SIMPLE — launched agent")
+        else:
+            await labels.transition_to(repo, issue.id, "ag/todo")
 
     async def launch_unblocked(self, repo: str, issue) -> None:
         """Launch an agent for a previously-blocked issue that got a human reply."""
@@ -194,6 +196,8 @@ class AgentLauncher:
         )
         if launched:
             logger.info(f"Issue #{issue.number}: UNBLOCKED — launched agent")
+        else:
+            await labels.transition_to(repo, issue.id, "ag/todo")
 
     async def launch_planner(self, repo: str, issue) -> None:
         """Launch an agent to decompose a COMPLEX issue."""
@@ -214,6 +218,8 @@ class AgentLauncher:
         )
         if launched:
             logger.info(f"Issue #{issue.number}: COMPLEX — launched planner agent")
+        else:
+            await labels.transition_to(repo, issue.id, "ag/todo")
 
     async def launch_review_handler(self, repo: str, pr_info: dict) -> None:
         """Launch an agent to address PR review comments."""
@@ -298,6 +304,8 @@ class AgentLauncher:
                 retry_count=retry_count + 1,
             )
             logger.info(f"Issue #{issue_id}: retry #{retry_count + 1} — launched agent")
+        else:
+            await labels.transition_to(repo, issue_id, "ag/todo")
 
     async def launch_ci_fix(self, repo: str, check_info: dict) -> bool:
         """Launch an agent to fix a failing CI check."""
