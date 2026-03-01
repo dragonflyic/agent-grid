@@ -1,10 +1,12 @@
 """The Tech Lead's main cron loop.
 
-Runs every N seconds (default 1 hour). Each cycle performs 9 phases:
+Runs every N seconds (default 1 hour). Each cycle performs 10 phases:
 1. Scan — fetch unprocessed open issues
 2. Classify — SIMPLE/COMPLEX/BLOCKED/SKIP
 3. Act — spawn agents, create sub-issues, post questions
 4. Monitor in-progress — check agent statuses
+   4b. Reap stale in-progress issues
+   4c. Auto-retry failed issues (retry_count < max_retries)
 5. Monitor PRs — detect human review comments
 6. Monitor closed PRs — detect feedback on closed PRs
 7. Poll CI failures — backup to webhook delivery
@@ -152,6 +154,10 @@ class ManagementLoop:
 
         # Phase 4: Monitor in-progress
         await self._check_in_progress(repo)
+        await self._reap_stale_in_progress(repo)
+
+        # Phase 4c: Auto-retry failed issues that haven't exhausted retries
+        await self._auto_retry_failed(repo)
 
         # Phase 5: Monitor PRs for review comments
         pr_monitor = get_pr_monitor()
@@ -771,6 +777,141 @@ class ManagementLoop:
                 execution.status = ExecutionStatus.FAILED
                 execution.result = "Timed out"
                 await self._db.update_execution(execution)
+                # Transition label so the issue exits in-progress
+                issue_id = await self._db.get_issue_id_for_execution(execution.id)
+                if issue_id:
+                    labels = get_label_manager()
+                    try:
+                        await labels.transition_to(repo, issue_id, "ag/failed")
+                    except Exception as e:
+                        logger.warning(f"Failed to transition issue #{issue_id} label: {e}")
+                    await self._db.record_pipeline_event(
+                        issue_number=int(issue_id),
+                        repo=repo,
+                        event_type="execution_timeout",
+                        stage="monitor",
+                        detail={"execution_id": str(execution.id), "elapsed_seconds": int(elapsed)},
+                    )
+                    logger.info(f"Issue #{issue_id}: timed out — transitioned to ag/failed")
+
+    async def _reap_stale_in_progress(self, repo: str) -> None:
+        """Phase 4b: Reap ag/in-progress issues with no active execution.
+
+        Catches issues where the execution finished but the label was never
+        transitioned (e.g., lost callbacks, bugs in older code).
+        """
+        from ..execution_grid import ExecutionStatus
+        from ..issue_tracker.public_api import IssueStatus
+
+        tracker = get_issue_tracker()
+        all_open = await tracker.list_issues(repo, status=IssueStatus.OPEN)
+        in_progress = [i for i in all_open if "ag/in-progress" in i.labels]
+
+        if not in_progress:
+            return
+
+        labels = get_label_manager()
+        reaped = 0
+        for issue in in_progress:
+            execution = await self._db.get_execution_for_issue(str(issue.number))
+            if execution and execution.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
+                continue  # Active execution — skip
+
+            logger.warning(f"Issue #{issue.number}: ag/in-progress but no active execution — reaping to ag/failed")
+            try:
+                await labels.transition_to(repo, str(issue.number), "ag/failed")
+            except Exception as e:
+                logger.warning(f"Failed to reap issue #{issue.number}: {e}")
+                continue
+            await self._db.record_pipeline_event(
+                issue_number=issue.number,
+                repo=repo,
+                event_type="stale_reaped",
+                stage="monitor",
+                detail={"reason": "in-progress with no active execution"},
+            )
+            reaped += 1
+
+        if reaped:
+            logger.info(f"Phase 4b: Reaped {reaped} stale in-progress issues")
+
+    async def _auto_retry_failed(self, repo: str) -> None:
+        """Phase 4c: Auto-retry ag/failed issues that haven't exhausted retries.
+
+        Finds open issues labelled ag/failed, checks retry_count against
+        max_retries_per_issue, and re-launches them as fresh implement attempts.
+        """
+        from ..issue_tracker.public_api import IssueStatus
+
+        tracker = get_issue_tracker()
+        all_open = await tracker.list_issues(repo, status=IssueStatus.OPEN)
+        failed = [i for i in all_open if "ag/failed" in i.labels]
+
+        if not failed:
+            return
+
+        budget = get_budget_manager()
+        labels = get_label_manager()
+        retried = 0
+
+        for issue in failed:
+            if retried >= settings.max_auto_retries_per_cycle:
+                logger.info(f"Auto-retry: per-cycle cap ({settings.max_auto_retries_per_cycle}) reached, stopping")
+                break
+
+            can_launch, reason = await budget.can_launch_agent()
+            if not can_launch:
+                logger.info(f"Auto-retry: budget limit reached ({reason}), stopping")
+                break
+
+            issue_state = await self._db.get_issue_state(issue.number, repo)
+            retry_count = (issue_state or {}).get("retry_count", 0)
+            if retry_count >= settings.max_retries_per_issue:
+                continue
+
+            if await self._has_active_execution(str(issue.number)):
+                continue
+
+            # Fetch checkpoint from previous attempt if available
+            checkpoint = await self._db.get_latest_checkpoint(str(issue.number))
+            context = {}
+            if checkpoint:
+                context["what_not_to_do"] = checkpoint.get("context_summary", "")
+
+            prompt = build_prompt(issue, repo, mode="implement", context=context, checkpoint=checkpoint)
+            await labels.transition_to(repo, str(issue.number), "ag/in-progress")
+
+            launched = await self._claim_and_launch(
+                issue_id=str(issue.number),
+                repo_url=f"https://github.com/{repo}.git",
+                prompt=prompt,
+                mode="implement",
+                issue_number=issue.number,
+            )
+            if launched:
+                await self._db.upsert_issue_state(
+                    issue_number=issue.number,
+                    repo=repo,
+                    retry_count=retry_count + 1,
+                )
+                await self._db.record_pipeline_event(
+                    issue_number=issue.number,
+                    repo=repo,
+                    event_type="auto_retry",
+                    stage="retry",
+                    detail={"retry_count": retry_count + 1, "max_retries": settings.max_retries_per_issue},
+                )
+                logger.info(f"Issue #{issue.number}: auto-retry #{retry_count + 1} — launched agent")
+                retried += 1
+            else:
+                # Revert label if launch failed
+                try:
+                    await labels.transition_to(repo, str(issue.number), "ag/failed")
+                except Exception:
+                    pass
+
+        if retried:
+            logger.info(f"Phase 4c: Auto-retried {retried} failed issues")
 
     async def run_once(self) -> None:
         """Run a single cycle (for testing)."""

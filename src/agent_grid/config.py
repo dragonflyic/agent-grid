@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     max_tokens_per_run: int = 100000
     max_cost_per_day_usd: float = 50.0
     max_retries_per_issue: int = 2
+    max_auto_retries_per_cycle: int = 10
     max_ci_fix_retries: int = 5
 
     # Quality gate — confidence check before launching agents
