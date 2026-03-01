@@ -57,12 +57,8 @@ Issue #{issue.number}: {issue.title}
    - Then EXIT
 7. When done:
    - Push your branch and create a PR that closes the issue.
-   - If the repo has a `/ship` skill (check .claude/skills/), use it:
-     `/ship` with a commit message, PR title, and body that references "Closes #{issue.number}"
-   - Otherwise, manually:
-     - Push your branch
-     - Create PR with proper fields set:
-       gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/review-pending"{reviewer_flag}
+   - Create PR with proper fields set:
+     gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/review-pending"{reviewer_flag}
    - **EXIT immediately after the PR is created.** Do not continue working.
      Your job is done once the PR exists. CI will run automatically.
 
