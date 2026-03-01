@@ -321,6 +321,40 @@ class ManagementLoop:
             return True
         return False
 
+    async def _resolve_reviewer(self, repo: str, issue) -> str | None:
+        """Resolve the right reviewer for an issue.
+
+        For sub-issues (ag/sub-issue label), look up the parent issue's author
+        since the sub-issue was created by the bot, not a human.
+        Falls back to issue.author if parent lookup fails.
+        """
+        if "ag/sub-issue" not in issue.labels:
+            return None  # Use default (issue.author)
+
+        # Parse parent issue number from title "[Sub #NNN]" or body "Part of #NNN"
+        import re
+
+        parent_number = None
+        title_match = re.search(r"\[Sub #(\d+)\]", issue.title)
+        if title_match:
+            parent_number = title_match.group(1)
+        elif issue.body:
+            body_match = re.search(r"Part of #(\d+)", issue.body)
+            if body_match:
+                parent_number = body_match.group(1)
+
+        if not parent_number:
+            return None
+
+        try:
+            parent = await self._tracker.get_issue(repo, parent_number)
+            if parent and parent.author:
+                return parent.author
+        except Exception as e:
+            logger.warning(f"Issue #{issue.number}: failed to resolve parent #{parent_number} author: {e}")
+
+        return None
+
     async def _launch_simple(self, repo: str, issue) -> None:
         """Launch an agent for a SIMPLE issue."""
         if await self._has_active_execution(issue.id):
@@ -329,7 +363,9 @@ class ManagementLoop:
         labels = get_label_manager()
         await labels.transition_to(repo, issue.id, "ag/in-progress")
 
-        prompt = build_prompt(issue, repo, mode="implement")
+        reviewer = await self._resolve_reviewer(repo, issue)
+        context = {"reviewer": reviewer} if reviewer else None
+        prompt = build_prompt(issue, repo, mode="implement", context=context)
         repo_url = f"https://github.com/{repo}.git"
 
         launched = await self._claim_and_launch(
@@ -366,6 +402,9 @@ class ManagementLoop:
                     clarification_comments.append(comment.body)
 
         context = {"clarification_comments": clarification_comments}
+        reviewer = await self._resolve_reviewer(repo, issue)
+        if reviewer:
+            context["reviewer"] = reviewer
         prompt = build_prompt(issue, repo, mode="implement", context=context)
 
         launched = await self._claim_and_launch(
@@ -413,6 +452,10 @@ class ManagementLoop:
             "review_comments": pr_info["review_comments"],
         }
 
+        reviewer = await self._resolve_reviewer(repo, issue)
+        if reviewer:
+            context["reviewer"] = reviewer
+
         prompt = build_prompt(issue, repo, mode="address_review", context=context, checkpoint=checkpoint)
 
         launched = await self._claim_and_launch(
@@ -453,6 +496,10 @@ class ManagementLoop:
             "human_feedback": pr_info["human_feedback"],
             "what_not_to_do": checkpoint.get("context_summary", "") if checkpoint else "",
         }
+
+        reviewer = await self._resolve_reviewer(repo, issue)
+        if reviewer:
+            context["reviewer"] = reviewer
 
         prompt = build_prompt(issue, repo, mode="retry_with_feedback", context=context, checkpoint=checkpoint)
 
@@ -877,6 +924,10 @@ class ManagementLoop:
             context = {}
             if checkpoint:
                 context["what_not_to_do"] = checkpoint.get("context_summary", "")
+
+            reviewer = await self._resolve_reviewer(repo, issue)
+            if reviewer:
+                context["reviewer"] = reviewer
 
             prompt = build_prompt(issue, repo, mode="implement", context=context, checkpoint=checkpoint)
             await labels.transition_to(repo, str(issue.number), "ag/in-progress")

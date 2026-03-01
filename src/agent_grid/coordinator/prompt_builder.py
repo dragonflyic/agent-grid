@@ -22,7 +22,9 @@ def build_prompt(
     branch_name = f"agent/{issue.number}"
 
     # PR flags for reviewer and label
-    reviewer_flag = f" --reviewer {issue.author}" if issue.author else ""
+    # Use explicit reviewer override (e.g., parent issue owner for sub-issues)
+    reviewer = context.get("reviewer") or issue.author
+    reviewer_flag = f" --reviewer {reviewer}" if reviewer else ""
 
     # Format clarification thread if present
     clarification = ""
