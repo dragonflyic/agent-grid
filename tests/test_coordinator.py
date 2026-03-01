@@ -778,3 +778,143 @@ class TestReapStaleInProgress:
             await loop._reap_stale_in_progress("owner/repo")
 
         mock_labels.transition_to.assert_not_called()
+
+
+class TestAutoRetryFailed:
+    """Tests for _auto_retry_failed phase 4c."""
+
+    @pytest.mark.asyncio
+    async def test_retries_failed_issue_under_max(self):
+        """ag/failed issue with retry_count < max should be re-launched."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        failed_issue = IssueInfo(
+            id="42",
+            number=42,
+            title="Failed issue",
+            body="Fix something",
+            labels=["ag/failed"],
+            status=IssueStatus.OPEN,
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/42",
+        )
+
+        mock_db = AsyncMock()
+        mock_db.get_issue_state = AsyncMock(return_value={"retry_count": 0})
+        mock_db.get_execution_for_issue = AsyncMock(return_value=None)
+        mock_db.get_latest_checkpoint = AsyncMock(return_value=None)
+        mock_db.try_claim_issue = AsyncMock(return_value=True)
+        mock_db.upsert_issue_state = AsyncMock()
+        mock_db.record_pipeline_event = AsyncMock()
+        loop._db = mock_db
+
+        mock_tracker = AsyncMock()
+        mock_tracker.list_issues = AsyncMock(return_value=[failed_issue])
+        mock_labels = AsyncMock()
+        mock_budget = AsyncMock()
+        mock_budget.can_launch_agent = AsyncMock(return_value=(True, ""))
+        mock_grid = AsyncMock()
+
+        with (
+            patch("agent_grid.coordinator.management_loop.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.management_loop.get_label_manager", return_value=mock_labels),
+            patch("agent_grid.coordinator.management_loop.get_budget_manager", return_value=mock_budget),
+            patch("agent_grid.coordinator.management_loop.get_execution_grid", return_value=mock_grid),
+            patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
+        ):
+            mock_settings.max_retries_per_issue = 2
+            await loop._auto_retry_failed("owner/repo")
+
+        # Should transition to in-progress then launch
+        mock_labels.transition_to.assert_any_call("owner/repo", "42", "ag/in-progress")
+        mock_db.try_claim_issue.assert_called_once()
+        mock_db.upsert_issue_state.assert_called_once_with(issue_number=42, repo="owner/repo", retry_count=1)
+        # Should record auto_retry pipeline event
+        retry_event_calls = [
+            c for c in mock_db.record_pipeline_event.call_args_list if c[1].get("event_type") == "auto_retry"
+        ]
+        assert len(retry_event_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_skips_issue_at_max_retries(self):
+        """ag/failed issue with retry_count >= max should not be retried."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        failed_issue = IssueInfo(
+            id="42",
+            number=42,
+            title="Failed issue",
+            body="Fix something",
+            labels=["ag/failed"],
+            status=IssueStatus.OPEN,
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/42",
+        )
+
+        mock_db = AsyncMock()
+        mock_db.get_issue_state = AsyncMock(return_value={"retry_count": 2})
+        loop._db = mock_db
+
+        mock_tracker = AsyncMock()
+        mock_tracker.list_issues = AsyncMock(return_value=[failed_issue])
+        mock_labels = AsyncMock()
+        mock_budget = AsyncMock()
+        mock_budget.can_launch_agent = AsyncMock(return_value=(True, ""))
+
+        with (
+            patch("agent_grid.coordinator.management_loop.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.management_loop.get_label_manager", return_value=mock_labels),
+            patch("agent_grid.coordinator.management_loop.get_budget_manager", return_value=mock_budget),
+            patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
+        ):
+            mock_settings.max_retries_per_issue = 2
+            await loop._auto_retry_failed("owner/repo")
+
+        mock_labels.transition_to.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_respects_budget_limit(self):
+        """Auto-retry should stop when budget is exhausted."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        failed_issue = IssueInfo(
+            id="42",
+            number=42,
+            title="Failed issue",
+            body="Fix something",
+            labels=["ag/failed"],
+            status=IssueStatus.OPEN,
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/42",
+        )
+
+        mock_db = AsyncMock()
+        loop._db = mock_db
+
+        mock_tracker = AsyncMock()
+        mock_tracker.list_issues = AsyncMock(return_value=[failed_issue])
+        mock_labels = AsyncMock()
+        mock_budget = AsyncMock()
+        mock_budget.can_launch_agent = AsyncMock(return_value=(False, "daily limit reached"))
+
+        with (
+            patch("agent_grid.coordinator.management_loop.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.management_loop.get_label_manager", return_value=mock_labels),
+            patch("agent_grid.coordinator.management_loop.get_budget_manager", return_value=mock_budget),
+            patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
+        ):
+            mock_settings.max_retries_per_issue = 2
+            await loop._auto_retry_failed("owner/repo")
+
+        # Should not attempt to launch
+        mock_labels.transition_to.assert_not_called()
+        mock_db.get_issue_state.assert_not_called()
