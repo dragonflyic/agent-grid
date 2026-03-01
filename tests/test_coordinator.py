@@ -452,7 +452,7 @@ class TestPRCreationPrompt:
         from agent_grid.coordinator.prompt_builder import build_prompt
 
         prompt = build_prompt(self._make_issue(), "owner/repo", mode="implement")
-        assert '--label "ag/in-progress"' in prompt
+        assert '--label "ag/review-pending"' in prompt
 
     def test_retry_prompt_includes_reviewer_flag(self):
         """Retry mode gh pr create should also include --reviewer."""
@@ -476,7 +476,7 @@ class TestPRCreationPrompt:
             mode="retry_with_feedback",
             context={"closed_pr_number": 3, "human_feedback": "wrong"},
         )
-        assert '--label "ag/in-progress"' in prompt
+        assert '--label "ag/review-pending"' in prompt
 
     def test_no_cc_author_in_body(self):
         """PR body should not contain 'cc @author' — use --reviewer instead."""
@@ -921,3 +921,70 @@ class TestAutoRetryFailed:
         # Should not attempt to launch
         mock_labels.transition_to.assert_not_called()
         mock_db.get_issue_state.assert_not_called()
+
+
+class TestResolveReviewer:
+    """Tests for _resolve_reviewer — parent issue author lookup for sub-issues."""
+
+    @pytest.mark.asyncio
+    async def test_returns_parent_author_for_sub_issue(self):
+        """Sub-issue should resolve to parent issue's author."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        sub_issue = IssueInfo(
+            id="100",
+            number=100,
+            title="[Sub #50] Do something",
+            body="Part of #50",
+            author="bot-user",
+            labels=["ag/sub-issue"],
+            status=IssueStatus.OPEN,
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/100",
+        )
+
+        parent_issue = IssueInfo(
+            id="50",
+            number=50,
+            title="Parent issue",
+            body="",
+            author="human-user",
+            labels=[],
+            status=IssueStatus.OPEN,
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/50",
+        )
+
+        mock_tracker = AsyncMock()
+        mock_tracker.get_issue = AsyncMock(return_value=parent_issue)
+        loop._tracker = mock_tracker
+
+        reviewer = await loop._resolve_reviewer("owner/repo", sub_issue)
+        assert reviewer == "human-user"
+        mock_tracker.get_issue.assert_called_once_with("owner/repo", "50")
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_non_sub_issue(self):
+        """Non-sub-issue should return None (use default author)."""
+        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
+
+        loop = ManagementLoop.__new__(ManagementLoop)
+
+        regular_issue = IssueInfo(
+            id="100",
+            number=100,
+            title="Regular issue",
+            body="Fix a bug",
+            author="human-user",
+            labels=[],
+            status=IssueStatus.OPEN,
+            repo_url="https://github.com/owner/repo",
+            html_url="https://github.com/owner/repo/issues/100",
+        )
+
+        reviewer = await loop._resolve_reviewer("owner/repo", regular_issue)
+        assert reviewer is None
