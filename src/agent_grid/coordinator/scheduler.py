@@ -186,10 +186,10 @@ class Scheduler:
         resolver = get_blocker_resolver()
         if resolver._has_human_reply_after_block(issue.comments):
             logger.info(f"Issue #{issue_id} unblocked via webhook — launching agent")
-            from .management_loop import get_management_loop
+            from .agent_launcher import get_agent_launcher
 
-            loop = get_management_loop()
-            await loop._launch_unblocked(repo, issue)
+            launcher = get_agent_launcher()
+            await launcher.launch_unblocked(repo, issue)
 
     # -------------------------------------------------------------------------
     # PR events
@@ -223,10 +223,10 @@ class Scheduler:
 
         for pr_info in prs_needing_work:
             if pr_info["pr_number"] == pr_number and pr_info["issue_id"]:
-                from .management_loop import get_management_loop
+                from .agent_launcher import get_agent_launcher
 
-                loop = get_management_loop()
-                await loop._launch_review_handler(repo, pr_info)
+                launcher = get_agent_launcher()
+                await launcher.launch_review_handler(repo, pr_info)
                 break
 
     async def _handle_pr_comment(self, event: Event) -> None:
@@ -241,17 +241,8 @@ class Scheduler:
 
         # Fetch the PR to get the branch name
         tracker = get_issue_tracker()
-        from ..issue_tracker.github_client import GitHubClient
-
-        if not isinstance(tracker, GitHubClient):
-            return
-
-        try:
-            resp = await tracker._client.get(f"/repos/{repo}/pulls/{pr_number}")
-            resp.raise_for_status()
-            pr_data = resp.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch PR #{pr_number}: {e}")
+        pr_data = await tracker.get_pr_data(repo, pr_number)
+        if not pr_data:
             return
 
         head_branch = pr_data.get("head", {}).get("ref", "")
@@ -271,10 +262,10 @@ class Scheduler:
             "review_comments": comment_body,
         }
 
-        from .management_loop import get_management_loop
+        from .agent_launcher import get_agent_launcher
 
-        loop = get_management_loop()
-        await loop._launch_review_handler(repo, pr_info)
+        launcher = get_agent_launcher()
+        await launcher.launch_review_handler(repo, pr_info)
         logger.info(f"PR #{pr_number}: launched agent from PR comment")
 
     async def _handle_pr_closed(self, event: Event) -> None:
@@ -301,10 +292,7 @@ class Scheduler:
             await labels_mgr.transition_to(repo, issue_id, "ag/done")
             # Mirror label onto PR
             tracker = get_issue_tracker()
-            from ..issue_tracker.github_client import GitHubClient
-
-            if isinstance(tracker, GitHubClient):
-                await tracker._add_label(repo, str(pr_number), "ag/done")
+            await tracker.add_label(repo, str(pr_number), "ag/done")
             await tracker.update_issue_status(repo, issue_id, IssueStatus.CLOSED)
             logger.info(f"PR #{pr_number} merged — issue #{issue_id} marked ag/done")
             return
@@ -317,10 +305,10 @@ class Scheduler:
 
         for pr_info in closed_prs:
             if pr_info["pr_number"] == pr_number and pr_info["issue_id"]:
-                from .management_loop import get_management_loop
+                from .agent_launcher import get_agent_launcher
 
-                loop = get_management_loop()
-                await loop._launch_retry(repo, pr_info)
+                launcher = get_agent_launcher()
+                await launcher.launch_retry(repo, pr_info)
                 break
 
     async def _handle_check_run_failed(self, event: Event) -> None:
@@ -370,24 +358,23 @@ class Scheduler:
             return
 
         # Fetch actual CI logs if check_output is empty (GitHub Actions doesn't populate output fields)
-        from .management_loop import get_management_loop
+        from .agent_launcher import get_agent_launcher
 
-        loop = get_management_loop()
-        payload = await loop._enrich_check_output(repo, payload)
+        launcher = get_agent_launcher()
+        payload = await launcher.enrich_check_output(repo, payload)
 
         # Launch CI fix agent
-        launched = await loop._launch_ci_fix(repo, payload)
+        launched = await launcher.launch_ci_fix(repo, payload)
 
         if not launched:
             logger.info(f"Issue #{issue_id}: CI fix agent not launched (active execution or claim failed)")
             return
 
-        # Only update metadata after successful launch
-        updated_metadata = {**metadata, "last_ci_check_sha": head_sha, "ci_fix_count": ci_fix_count + 1}
-        await self._db.upsert_issue_state(
+        # Only update metadata after successful launch (atomic merge)
+        await self._db.merge_issue_metadata(
             issue_number=int(issue_id),
             repo=repo,
-            metadata=updated_metadata,
+            metadata_update={"last_ci_check_sha": head_sha, "ci_fix_count": ci_fix_count + 1},
         )
         logger.info(f"Issue #{issue_id}: CI fix #{ci_fix_count + 1} launched for '{payload.get('check_name')}'")
 
@@ -435,9 +422,9 @@ class Scheduler:
             },
         )
 
-        from .management_loop import get_management_loop
+        from .agent_launcher import get_agent_launcher
 
-        loop = get_management_loop()
+        launcher = get_agent_launcher()
         labels = get_label_manager()
 
         if classification.category == "SKIP":
@@ -463,15 +450,15 @@ class Scheduler:
 
         # Quality gate for SIMPLE and COMPLEX issues
         if settings.quality_gate_enabled:
-            gate_result = await loop._run_quality_gate(repo, issue, classification, is_proactive=False)
+            gate_result = await launcher.run_quality_gate(repo, issue, classification, is_proactive=False)
             if gate_result != "proceed":
                 logger.info(f"Webhook: Issue #{issue.number}: quality gate {gate_result}")
                 return
 
         if classification.category == "SIMPLE":
-            await loop._launch_simple(repo, issue)
+            await launcher.launch_simple(repo, issue)
         elif classification.category == "COMPLEX":
-            await loop._launch_planner(repo, issue)
+            await launcher.launch_planner(repo, issue)
 
         logger.info(f"Webhook: Processed issue #{issue.number} as {classification.category}")
 
@@ -574,10 +561,7 @@ class Scheduler:
                             # Mirror label onto the PR itself for filtering
                             if pr_number:
                                 tracker = get_issue_tracker()
-                                from ..issue_tracker.github_client import GitHubClient
-
-                                if isinstance(tracker, GitHubClient):
-                                    await tracker._add_label(repo, str(pr_number), "ag/review-pending")
+                                await tracker.add_label(repo, str(pr_number), "ag/review-pending")
                             await self._assign_and_tag_owner(repo, issue_id, pr_number)
 
         # Process any pending nudges now that we have capacity
@@ -591,18 +575,15 @@ class Scheduler:
             if not issue.author:
                 return
 
-            from ..issue_tracker.github_client import GitHubClient
+            await tracker.assign_issue(repo, issue_id, issue.author)
 
-            if isinstance(tracker, GitHubClient):
-                await tracker.assign_issue(repo, issue_id, issue.author)
-
-                if pr_number:
-                    await tracker.request_pr_reviewers(repo, pr_number, [issue.author])
-                    await tracker.add_pr_comment(
-                        repo,
-                        pr_number,
-                        f"@{issue.author} — this PR is ready for your review.",
-                    )
+            if pr_number:
+                await tracker.request_pr_reviewers(repo, pr_number, [issue.author])
+                await tracker.add_pr_comment(
+                    repo,
+                    pr_number,
+                    f"@{issue.author} — this PR is ready for your review.",
+                )
 
             pr_ref = f" PR #{pr_number}" if pr_number else ""
             await tracker.add_comment(
@@ -662,10 +643,10 @@ class Scheduler:
         prompt = build_prompt(issue, repo, mode="implement")
         repo_url = f"https://github.com/{repo}.git"
 
-        from .management_loop import get_management_loop
+        from .agent_launcher import get_agent_launcher
 
-        loop = get_management_loop()
-        launched = await loop._claim_and_launch(
+        launcher = get_agent_launcher()
+        launched = await launcher.claim_and_launch(
             issue_id=issue_id,
             repo_url=repo_url,
             prompt=prompt,

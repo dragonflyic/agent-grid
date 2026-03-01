@@ -403,11 +403,72 @@ class GitHubClient(IssueTracker):
             logger.warning(f"Failed to fetch check runs for {repo}@{ref}: {e}")
             return []
 
-    async def close(self) -> None:
-        """Close the HTTP client."""
-        await self._client.aclose()
+    async def list_open_prs(self, repo: str, **params) -> list[dict]:
+        """List open pull requests."""
+        try:
+            response = await self._client.get(
+                f"/repos/{repo}/pulls",
+                params={"state": "open", **params},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch PRs for {repo}: {e}")
+            return []
 
-    async def _add_label(self, repo: str, issue_id: str, label: str) -> None:
+    async def get_pr_reviews(self, repo: str, pr_number: int) -> list[dict]:
+        """Get reviews for a pull request."""
+        try:
+            response = await self._client.get(
+                f"/repos/{repo}/pulls/{pr_number}/reviews",
+                params={"per_page": 100},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch reviews for PR #{pr_number}: {e}")
+            return []
+
+    async def get_pr_comments(self, repo: str, pr_number: int) -> list[dict]:
+        """Get inline/review comments for a pull request."""
+        try:
+            response = await self._client.get(
+                f"/repos/{repo}/pulls/{pr_number}/comments",
+                params={"per_page": 100},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch comments for PR #{pr_number}: {e}")
+            return []
+
+    async def get_pr_data(self, repo: str, pr_number: int) -> dict | None:
+        """Fetch a single PR by number."""
+        try:
+            response = await self._client.get(f"/repos/{repo}/pulls/{pr_number}")
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch PR #{pr_number}: {e}")
+            return None
+
+    async def get_issue_comments_since(self, repo: str, issue_id: str, since: str | None = None) -> list[dict]:
+        """Fetch issue comments, optionally since a timestamp."""
+        try:
+            params: dict = {"per_page": 50}
+            if since:
+                params["since"] = since
+            response = await self._client.get(
+                f"/repos/{repo}/issues/{issue_id}/comments",
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch comments for issue #{issue_id}: {e}")
+            return []
+
+    async def add_label(self, repo: str, issue_id: str, label: str) -> None:
         """Add a label to an issue."""
         try:
             await self._client.post(
@@ -417,7 +478,7 @@ class GitHubClient(IssueTracker):
         except Exception:
             pass  # Label may already exist or not be valid
 
-    async def _remove_label(self, repo: str, issue_id: str, label: str) -> None:
+    async def remove_label(self, repo: str, issue_id: str, label: str) -> None:
         """Remove a label from an issue."""
         try:
             await self._client.delete(
@@ -425,6 +486,35 @@ class GitHubClient(IssueTracker):
             )
         except Exception:
             pass  # Label may not exist
+
+    async def create_label(self, repo: str, name: str, color: str) -> bool:
+        """Create a label in the repo. Returns True if created."""
+        try:
+            resp = await self._client.post(
+                f"/repos/{repo}/labels",
+                json={"name": name, "color": color},
+            )
+            resp.raise_for_status()
+            return True
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 422:
+                return False  # Already exists
+            logger.warning(f"Failed to create label {name}: {e.response.status_code}")
+            return False
+        except Exception as e:
+            logger.error(f"Error creating label {name}: {e}")
+            return False
+
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        await self._client.aclose()
+
+    # Keep private aliases for internal use in update_issue
+    async def _add_label(self, repo: str, issue_id: str, label: str) -> None:
+        await self.add_label(repo, issue_id, label)
+
+    async def _remove_label(self, repo: str, issue_id: str, label: str) -> None:
+        await self.remove_label(repo, issue_id, label)
 
     def _build_body(
         self,

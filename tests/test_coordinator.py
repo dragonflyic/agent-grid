@@ -804,9 +804,7 @@ class TestAutoRetryFailed:
 
         mock_db = AsyncMock()
         mock_db.get_issue_state = AsyncMock(return_value={"retry_count": 0})
-        mock_db.get_execution_for_issue = AsyncMock(return_value=None)
         mock_db.get_latest_checkpoint = AsyncMock(return_value=None)
-        mock_db.try_claim_issue = AsyncMock(return_value=True)
         mock_db.upsert_issue_state = AsyncMock()
         mock_db.record_pipeline_event = AsyncMock()
         loop._db = mock_db
@@ -816,13 +814,17 @@ class TestAutoRetryFailed:
         mock_labels = AsyncMock()
         mock_budget = AsyncMock()
         mock_budget.can_launch_agent = AsyncMock(return_value=(True, ""))
-        mock_grid = AsyncMock()
+
+        mock_launcher = AsyncMock()
+        mock_launcher.has_active_execution = AsyncMock(return_value=False)
+        mock_launcher.resolve_reviewer = AsyncMock(return_value=None)
+        mock_launcher.claim_and_launch = AsyncMock(return_value=True)
 
         with (
             patch("agent_grid.coordinator.management_loop.get_issue_tracker", return_value=mock_tracker),
             patch("agent_grid.coordinator.management_loop.get_label_manager", return_value=mock_labels),
             patch("agent_grid.coordinator.management_loop.get_budget_manager", return_value=mock_budget),
-            patch("agent_grid.coordinator.management_loop.get_execution_grid", return_value=mock_grid),
+            patch("agent_grid.coordinator.management_loop.get_agent_launcher", return_value=mock_launcher),
             patch("agent_grid.coordinator.management_loop.settings") as mock_settings,
         ):
             mock_settings.max_retries_per_issue = 2
@@ -831,7 +833,7 @@ class TestAutoRetryFailed:
 
         # Should transition to in-progress then launch
         mock_labels.transition_to.assert_any_call("owner/repo", "42", "ag/in-progress")
-        mock_db.try_claim_issue.assert_called_once()
+        mock_launcher.claim_and_launch.assert_called_once()
         mock_db.upsert_issue_state.assert_called_once_with(issue_number=42, repo="owner/repo", retry_count=1)
         # Should record auto_retry pipeline event
         retry_event_calls = [
@@ -924,15 +926,15 @@ class TestAutoRetryFailed:
 
 
 class TestResolveReviewer:
-    """Tests for _resolve_reviewer — parent issue author lookup for sub-issues."""
+    """Tests for resolve_reviewer — parent issue author lookup for sub-issues."""
 
     @pytest.mark.asyncio
     async def test_returns_parent_author_for_sub_issue(self):
         """Sub-issue should resolve to parent issue's author."""
-        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.coordinator.agent_launcher import AgentLauncher
         from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
 
-        loop = ManagementLoop.__new__(ManagementLoop)
+        launcher = AgentLauncher.__new__(AgentLauncher)
 
         sub_issue = IssueInfo(
             id="100",
@@ -960,19 +962,19 @@ class TestResolveReviewer:
 
         mock_tracker = AsyncMock()
         mock_tracker.get_issue = AsyncMock(return_value=parent_issue)
-        loop._tracker = mock_tracker
+        launcher._tracker = mock_tracker
 
-        reviewer = await loop._resolve_reviewer("owner/repo", sub_issue)
+        reviewer = await launcher.resolve_reviewer("owner/repo", sub_issue)
         assert reviewer == "human-user"
         mock_tracker.get_issue.assert_called_once_with("owner/repo", "50")
 
     @pytest.mark.asyncio
     async def test_returns_none_for_non_sub_issue(self):
         """Non-sub-issue should return None (use default author)."""
-        from agent_grid.coordinator.management_loop import ManagementLoop
+        from agent_grid.coordinator.agent_launcher import AgentLauncher
         from agent_grid.issue_tracker.public_api import IssueInfo, IssueStatus
 
-        loop = ManagementLoop.__new__(ManagementLoop)
+        launcher = AgentLauncher.__new__(AgentLauncher)
 
         regular_issue = IssueInfo(
             id="100",
@@ -986,5 +988,5 @@ class TestResolveReviewer:
             html_url="https://github.com/owner/repo/issues/100",
         )
 
-        reviewer = await loop._resolve_reviewer("owner/repo", regular_issue)
+        reviewer = await launcher.resolve_reviewer("owner/repo", regular_issue)
         assert reviewer is None

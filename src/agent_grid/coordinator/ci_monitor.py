@@ -29,24 +29,8 @@ class CIMonitor:
         Returns list of check_info dicts matching the CHECK_RUN_FAILED payload shape,
         suitable for passing directly to ManagementLoop._launch_ci_fix().
         """
-        from ..issue_tracker.github_client import GitHubClient
-
-        if not isinstance(self._tracker, GitHubClient):
-            return []
-
-        github: GitHubClient = self._tracker
-
         # Fetch open PRs
-        try:
-            response = await github._client.get(
-                f"/repos/{repo}/pulls",
-                params={"state": "open", "per_page": 100},
-            )
-            response.raise_for_status()
-            prs = response.json()
-        except Exception as e:
-            logger.error(f"CIMonitor: failed to fetch PRs: {e}")
-            return []
+        prs = await self._tracker.list_open_prs(repo, per_page=100)
 
         failures = []
 
@@ -72,7 +56,7 @@ class CIMonitor:
                 continue
 
             # Fetch check runs for this commit
-            check_runs = await github.get_check_runs_for_ref(repo, head_sha)
+            check_runs = await self._tracker.get_check_runs_for_ref(repo, head_sha)
             for cr in check_runs:
                 if cr.get("conclusion") not in ("failure", "timed_out"):
                     continue
