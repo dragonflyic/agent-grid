@@ -216,6 +216,29 @@ class OzExecutionGrid(ExecutionGrid):
                     except Exception as e:
                         logger.warning(f"Failed to persist cost for {exec_id}: {e}")
 
+                # Update DB directly before publishing event — ensures DB is
+                # consistent even if the async event handler fails or drops the event.
+                try:
+                    from ..coordinator.database import get_database as _get_db
+
+                    db = _get_db()
+                    if run.state == "SUCCEEDED":
+                        await db.update_execution_result(
+                            execution_id=exec_id,
+                            status=ExecutionStatus.COMPLETED,
+                            result=result,
+                            pr_number=pr_number,
+                            branch=branch,
+                        )
+                    else:
+                        await db.update_execution_result(
+                            execution_id=exec_id,
+                            status=ExecutionStatus.FAILED,
+                            result=result or f"Run {run.state.lower()}",
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to update DB for execution {exec_id}: {e}")
+
                 if run.state == "SUCCEEDED":
                     execution = self._executions.get(exec_id)
                     if execution:
