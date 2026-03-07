@@ -62,6 +62,13 @@ Issue #{issue.number}: {issue.title}
    - **EXIT immediately after the PR is created.** Do not continue working.
      Your job is done once the PR exists. CI will run automatically.
 
+## Git Identity
+Before making any commits, configure your git identity:
+```bash
+git config user.name "agent-grid[bot]"
+git config user.email "3031599+agent-grid[bot]@users.noreply.github.com"
+```
+
 ## Skills
 Check the `.claude/skills/` directory in the repo for available skills.
 Skills contain repo-specific coding standards, workflows, and tools.
