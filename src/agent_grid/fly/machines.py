@@ -39,6 +39,7 @@ class FlyMachinesClient:
     async def _get_github_token(self) -> str:
         """Get a fresh GitHub installation token for the worker."""
         from ..github_app import get_github_app_auth
+
         return await get_github_app_auth().get_installation_token()
 
     async def spawn_worker(

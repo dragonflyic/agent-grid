@@ -39,6 +39,7 @@ class ProjectManager:
     async def _ensure_auth(self) -> None:
         """Ensure the client has a valid Authorization header."""
         from ..github_app import get_github_app_auth
+
         if self._app_auth is None:
             self._app_auth = get_github_app_auth()
         token = await self._app_auth.get_installation_token()

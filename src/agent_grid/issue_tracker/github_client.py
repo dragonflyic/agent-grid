@@ -50,6 +50,7 @@ class GitHubClient(IssueTracker):
             self._client.headers["Authorization"] = f"Bearer {self._static_token}"
             return
         from ..github_app import get_github_app_auth
+
         if self._app_auth is None:
             self._app_auth = get_github_app_auth()
         token = await self._app_auth.get_installation_token()
