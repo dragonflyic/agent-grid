@@ -35,13 +35,6 @@ variable "github_app_installation_id" {
   default     = ""
 }
 
-variable "github_provider_token" {
-  description = "GitHub token for Terraform provider (org webhook management). Can be a PAT or installation token."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "github_webhook_secret" {
   description = "GitHub webhook secret"
   type        = string

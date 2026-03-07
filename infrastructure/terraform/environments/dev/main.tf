@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    github = {
-      source  = "integrations/github"
-      version = "~> 6.0"
-    }
   }
 
   backend "s3" {
@@ -29,11 +25,6 @@ provider "aws" {
       ManagedBy   = "terraform"
     }
   }
-}
-
-provider "github" {
-  owner = var.github_org
-  token = var.github_provider_token
 }
 
 # Data sources for existing VPC (use default VPC for MVP)
@@ -240,17 +231,6 @@ locals {
   }
 }
 
-# GitHub Organization Webhook
-resource "github_organization_webhook" "agent_grid" {
-  count = var.github_org != "" ? 1 : 0
-
-  configuration {
-    url          = "https://${module.apprunner.service_url}/webhooks/github"
-    content_type = "json"
-    secret       = var.github_webhook_secret
-    insecure_ssl = false
-  }
-
-  events = ["issues", "issue_comment"]
-  active = true
-}
+# NOTE: GitHub organization webhook is managed via the GitHub App's webhook
+# settings, not via Terraform. The GitHub Terraform provider requires
+# Administration permission which we don't grant to the App.
