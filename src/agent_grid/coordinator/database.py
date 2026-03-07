@@ -410,12 +410,13 @@ class Database:
 
         async with self._session() as session:
             await session.execute(
-                text("""
-                    UPDATE issue_state
-                    SET metadata = COALESCE(metadata::jsonb, '{}'::jsonb) || :new_metadata::jsonb,
-                        updated_at = NOW()
-                    WHERE issue_number = :issue_number AND repo = :repo
-                """),
+                text(
+                    "UPDATE issue_state"
+                    " SET metadata = COALESCE(CAST(metadata AS jsonb), CAST('{}' AS jsonb))"
+                    " || CAST(:new_metadata AS jsonb),"
+                    " updated_at = NOW()"
+                    " WHERE issue_number = :issue_number AND repo = :repo"
+                ),
                 {
                     "issue_number": issue_number,
                     "repo": repo,
