@@ -6,7 +6,6 @@ from datetime import datetime
 
 import httpx
 
-from ..config import settings
 from .public_api import Comment, IssueInfo, IssueStatus, IssueTracker
 
 logger = logging.getLogger("agent_grid.github_client")
@@ -34,19 +33,31 @@ class GitHubClient(IssueTracker):
     ISSUE_REF_PATTERN = re.compile(r"#(\d+)")
 
     def __init__(self, token: str | None = None):
-        self._token = token or settings.github_token
+        self._static_token = token  # static token override (for tests)
+        self._app_auth = None  # lazy-loaded
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             headers={
                 "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {self._token}",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
             timeout=30.0,
         )
 
+    async def _ensure_auth(self) -> None:
+        """Ensure the client has a valid Authorization header."""
+        if self._static_token:
+            self._client.headers["Authorization"] = f"Bearer {self._static_token}"
+            return
+        from ..github_app import get_github_app_auth
+        if self._app_auth is None:
+            self._app_auth = get_github_app_auth()
+        token = await self._app_auth.get_installation_token()
+        self._client.headers["Authorization"] = f"Bearer {token}"
+
     async def get_issue(self, repo: str, issue_id: str) -> IssueInfo:
         """Get information about a GitHub issue including comments and parent."""
+        await self._ensure_auth()
         # Fetch issue
         response = await self._client.get(f"/repos/{repo}/issues/{issue_id}")
         response.raise_for_status()
@@ -113,6 +124,7 @@ class GitHubClient(IssueTracker):
         labels: list[str] | None = None,
     ) -> list[IssueInfo]:
         """List issues with optional filters."""
+        await self._ensure_auth()
         params: dict = {"per_page": 100}
 
         # Map status to GitHub state
@@ -159,6 +171,7 @@ class GitHubClient(IssueTracker):
 
     async def list_subissues(self, repo: str, parent_id: str) -> list[IssueInfo]:
         """List all subissues of a parent issue using GitHub's sub-issues API."""
+        await self._ensure_auth()
         subissues = []
         page = 1
 
@@ -192,6 +205,7 @@ class GitHubClient(IssueTracker):
         blocked_by: list[str] | None = None,
     ) -> IssueInfo:
         """Create a new issue."""
+        await self._ensure_auth()
         # Build body with blocking metadata (parent is handled via sub-issues API)
         full_body = self._build_body(body, blocked_by)
 
@@ -217,6 +231,7 @@ class GitHubClient(IssueTracker):
         labels: list[str] | None = None,
     ) -> IssueInfo:
         """Create a subissue under a parent issue using GitHub's sub-issues API."""
+        await self._ensure_auth()
         # First create the issue and get the raw response to extract GitHub's issue ID
         full_body = self._build_body(body, None)
 
@@ -259,6 +274,7 @@ class GitHubClient(IssueTracker):
 
         Note: parent_id is managed via GitHub's sub-issues API, not here.
         """
+        await self._ensure_auth()
         # Get current issue to preserve unspecified fields
         current = await self.get_issue(repo, issue_id)
 
@@ -296,6 +312,7 @@ class GitHubClient(IssueTracker):
 
     async def add_comment(self, repo: str, issue_id: str, body: str) -> None:
         """Add a comment to an issue."""
+        await self._ensure_auth()
         response = await self._client.post(
             f"/repos/{repo}/issues/{issue_id}/comments",
             json={"body": body},
@@ -304,6 +321,7 @@ class GitHubClient(IssueTracker):
 
     async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         """Update the status of an issue."""
+        await self._ensure_auth()
         await self.update_issue(repo, issue_id, status=status)
 
     async def get_actions_job_logs(self, repo: str, job_id: int) -> str:
@@ -313,6 +331,7 @@ class GitHubClient(IssueTracker):
         We follow the redirect and return the log text, truncated to
         the last ~3000 chars (the tail is most useful for build errors).
         """
+        await self._ensure_auth()
         try:
             response = await self._client.get(
                 f"/repos/{repo}/actions/jobs/{job_id}/logs",
@@ -330,6 +349,7 @@ class GitHubClient(IssueTracker):
 
     async def assign_issue(self, repo: str, issue_id: str, assignee: str) -> None:
         """Assign an issue to a user."""
+        await self._ensure_auth()
         if not assignee:
             return
         try:
@@ -342,6 +362,7 @@ class GitHubClient(IssueTracker):
 
     async def request_pr_reviewers(self, repo: str, pr_number: int, reviewers: list[str]) -> None:
         """Request reviewers on a pull request."""
+        await self._ensure_auth()
         if not reviewers:
             return
         try:
@@ -357,6 +378,7 @@ class GitHubClient(IssueTracker):
 
         Returns the raw PR dict or None if no PR exists for that branch.
         """
+        await self._ensure_auth()
         owner = repo.split("/")[0]
         try:
             response = await self._client.get(
@@ -372,6 +394,7 @@ class GitHubClient(IssueTracker):
 
     async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
         """Post a comment on a pull request."""
+        await self._ensure_auth()
         try:
             await self._client.post(
                 f"/repos/{repo}/issues/{pr_number}/comments",
@@ -392,6 +415,7 @@ class GitHubClient(IssueTracker):
         Calls GET /repos/{repo}/commits/{ref}/check-runs.
         Returns the raw list of check_run dicts (empty list on error).
         """
+        await self._ensure_auth()
         try:
             response = await self._client.get(
                 f"/repos/{repo}/commits/{ref}/check-runs",
@@ -405,6 +429,7 @@ class GitHubClient(IssueTracker):
 
     async def list_open_prs(self, repo: str, **params) -> list[dict]:
         """List open pull requests."""
+        await self._ensure_auth()
         try:
             response = await self._client.get(
                 f"/repos/{repo}/pulls",
@@ -418,6 +443,7 @@ class GitHubClient(IssueTracker):
 
     async def get_pr_reviews(self, repo: str, pr_number: int) -> list[dict]:
         """Get reviews for a pull request."""
+        await self._ensure_auth()
         try:
             response = await self._client.get(
                 f"/repos/{repo}/pulls/{pr_number}/reviews",
@@ -431,6 +457,7 @@ class GitHubClient(IssueTracker):
 
     async def get_pr_comments(self, repo: str, pr_number: int) -> list[dict]:
         """Get inline/review comments for a pull request."""
+        await self._ensure_auth()
         try:
             response = await self._client.get(
                 f"/repos/{repo}/pulls/{pr_number}/comments",
@@ -444,6 +471,7 @@ class GitHubClient(IssueTracker):
 
     async def get_pr_data(self, repo: str, pr_number: int) -> dict | None:
         """Fetch a single PR by number."""
+        await self._ensure_auth()
         try:
             response = await self._client.get(f"/repos/{repo}/pulls/{pr_number}")
             response.raise_for_status()
@@ -454,6 +482,7 @@ class GitHubClient(IssueTracker):
 
     async def get_issue_comments_since(self, repo: str, issue_id: str, since: str | None = None) -> list[dict]:
         """Fetch issue comments, optionally since a timestamp."""
+        await self._ensure_auth()
         try:
             params: dict = {"per_page": 50}
             if since:
@@ -470,6 +499,7 @@ class GitHubClient(IssueTracker):
 
     async def add_label(self, repo: str, issue_id: str, label: str) -> None:
         """Add a label to an issue."""
+        await self._ensure_auth()
         try:
             await self._client.post(
                 f"/repos/{repo}/issues/{issue_id}/labels",
@@ -480,6 +510,7 @@ class GitHubClient(IssueTracker):
 
     async def remove_label(self, repo: str, issue_id: str, label: str) -> None:
         """Remove a label from an issue."""
+        await self._ensure_auth()
         try:
             await self._client.delete(
                 f"/repos/{repo}/issues/{issue_id}/labels/{label}",
@@ -489,6 +520,7 @@ class GitHubClient(IssueTracker):
 
     async def create_label(self, repo: str, name: str, color: str) -> bool:
         """Create a label in the repo. Returns True if created."""
+        await self._ensure_auth()
         try:
             resp = await self._client.post(
                 f"/repos/{repo}/labels",
