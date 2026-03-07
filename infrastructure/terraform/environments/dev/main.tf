@@ -32,8 +32,12 @@ provider "aws" {
 }
 
 provider "github" {
-  token = var.github_token
   owner = var.github_org
+  app_auth {
+    id              = var.github_app_id
+    installation_id = var.github_app_installation_id
+    pem_file        = var.github_app_private_key
+  }
 }
 
 # Data sources for existing VPC (use default VPC for MVP)
@@ -124,8 +128,10 @@ module "secrets" {
   database_host         = module.database.address
   database_port         = module.database.port
   database_name         = module.database.database_name
-  github_token          = var.github_token
-  github_webhook_secret = var.github_webhook_secret
+  github_app_id              = var.github_app_id
+  github_app_private_key     = var.github_app_private_key
+  github_app_installation_id = var.github_app_installation_id
+  github_webhook_secret      = var.github_webhook_secret
   fly_api_token         = var.fly_api_token
   anthropic_api_key     = var.anthropic_api_key
   warp_api_key          = var.warp_api_key
@@ -165,9 +171,11 @@ module "apprunner" {
     {
       AGENT_GRID_DATABASE_URL = "${module.secrets.database_secret_arn}:connection_string::"
     },
-    var.github_token != "" ? {
-      AGENT_GRID_GITHUB_TOKEN          = "${module.secrets.github_secret_arn}:token::"
-      AGENT_GRID_GITHUB_WEBHOOK_SECRET = "${module.secrets.github_secret_arn}:webhook_secret::"
+    var.github_app_id != "" ? {
+      AGENT_GRID_GITHUB_APP_ID              = "${module.secrets.github_secret_arn}:app_id::"
+      AGENT_GRID_GITHUB_APP_PRIVATE_KEY     = "${module.secrets.github_secret_arn}:private_key::"
+      AGENT_GRID_GITHUB_APP_INSTALLATION_ID = "${module.secrets.github_secret_arn}:installation_id::"
+      AGENT_GRID_GITHUB_WEBHOOK_SECRET      = "${module.secrets.github_secret_arn}:webhook_secret::"
     } : {},
     module.secrets.coordinator_secret_arn != "" ? {
       AGENT_GRID_FLY_API_TOKEN    = "${module.secrets.coordinator_secret_arn}:fly_api_token::"
@@ -214,8 +222,10 @@ module "ecs_scheduled_task" {
     {
       AGENT_GRID_DATABASE_URL = "${module.secrets.database_secret_arn}:connection_string::"
     },
-    var.github_token != "" ? {
-      AGENT_GRID_GITHUB_TOKEN = "${module.secrets.github_secret_arn}:token::"
+    var.github_app_id != "" ? {
+      AGENT_GRID_GITHUB_APP_ID              = "${module.secrets.github_secret_arn}:app_id::"
+      AGENT_GRID_GITHUB_APP_PRIVATE_KEY     = "${module.secrets.github_secret_arn}:private_key::"
+      AGENT_GRID_GITHUB_APP_INSTALLATION_ID = "${module.secrets.github_secret_arn}:installation_id::"
     } : {},
     module.secrets.coordinator_secret_arn != "" ? {
       AGENT_GRID_FLY_API_TOKEN     = "${module.secrets.coordinator_secret_arn}:fly_api_token::"

@@ -4,7 +4,9 @@ Issues get stuck when an execution times out or fails but the label is never
 transitioned. This script finds all such issues and moves them to ag/failed.
 
 This script uses only the GitHub API (no DB connection required), making it
-safe to run from any machine with a valid GITHUB_TOKEN.
+safe to run from any machine with valid GitHub App credentials
+(AGENT_GRID_GITHUB_APP_ID, AGENT_GRID_GITHUB_APP_PRIVATE_KEY,
+AGENT_GRID_GITHUB_APP_INSTALLATION_ID).
 
 Usage:
     # Dry-run (default) — shows what would change

@@ -28,6 +28,13 @@ class ProjectManager:
             },
             timeout=30.0,
         )
+        self._project_number = settings.github_project_number
+        self._project_owner = settings.github_project_owner
+        self._project_id: str | None = None
+        self._status_field_id: str | None = None
+        self._status_options: dict[str, str] = {}  # display name -> option id
+        self._initialized = False
+        self._label_status_map: dict[str, str] = self._parse_label_map()
 
     async def _ensure_auth(self) -> None:
         """Ensure the client has a valid Authorization header."""
@@ -36,13 +43,6 @@ class ProjectManager:
             self._app_auth = get_github_app_auth()
         token = await self._app_auth.get_installation_token()
         self._client.headers["Authorization"] = f"Bearer {token}"
-        self._project_number = settings.github_project_number
-        self._project_owner = settings.github_project_owner
-        self._project_id: str | None = None
-        self._status_field_id: str | None = None
-        self._status_options: dict[str, str] = {}  # display name -> option id
-        self._initialized = False
-        self._label_status_map: dict[str, str] = self._parse_label_map()
 
     @staticmethod
     def _parse_label_map() -> dict[str, str]:

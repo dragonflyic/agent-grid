@@ -20,19 +20,21 @@ resource "aws_secretsmanager_secret_version" "database" {
 }
 
 resource "aws_secretsmanager_secret" "github" {
-  count       = var.github_token != "" ? 1 : 0
+  count       = var.github_app_id != "" ? 1 : 0
   name        = "${var.project_name}/github"
-  description = "GitHub credentials for Agent Grid"
+  description = "GitHub App credentials for Agent Grid"
 
   tags = var.tags
 }
 
 resource "aws_secretsmanager_secret_version" "github" {
-  count     = var.github_token != "" ? 1 : 0
+  count     = var.github_app_id != "" ? 1 : 0
   secret_id = aws_secretsmanager_secret.github[0].id
   secret_string = jsonencode({
-    token          = var.github_token
-    webhook_secret = var.github_webhook_secret
+    app_id          = var.github_app_id
+    private_key     = var.github_app_private_key
+    installation_id = var.github_app_installation_id
+    webhook_secret  = var.github_webhook_secret
   })
 }
 

@@ -11,7 +11,9 @@ Does NOT write anything to GitHub -- prompt tells agent not to push/PR.
 
 Usage:
     AGENT_GRID_TARGET_REPO=myorg/myrepo \\
-    AGENT_GRID_GITHUB_TOKEN=ghp_... \\
+    AGENT_GRID_GITHUB_APP_ID=... \\
+    AGENT_GRID_GITHUB_APP_PRIVATE_KEY="$(cat key.pem)" \\
+    AGENT_GRID_GITHUB_APP_INSTALLATION_ID=... \\
     AGENT_GRID_ANTHROPIC_API_KEY=sk-ant-... \\
     AGENT_GRID_FLY_API_TOKEN=... \\
     AGENT_GRID_FLY_APP_NAME=agent-grid-workers \\
@@ -63,8 +65,8 @@ async def main():
     errors = []
     if not settings.target_repo:
         errors.append("AGENT_GRID_TARGET_REPO=owner/repo")
-    if not settings.github_token:
-        errors.append("AGENT_GRID_GITHUB_TOKEN=ghp_...")
+    if not settings.github_app_id:
+        errors.append("AGENT_GRID_GITHUB_APP_ID=...")
     if not settings.anthropic_api_key:
         errors.append("AGENT_GRID_ANTHROPIC_API_KEY=sk-ant-...")
     if not settings.fly_api_token:

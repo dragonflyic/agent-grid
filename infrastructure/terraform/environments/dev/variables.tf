@@ -16,10 +16,22 @@ variable "database_password" {
   sensitive   = true
 }
 
-variable "github_token" {
-  description = "GitHub personal access token"
+variable "github_app_id" {
+  description = "GitHub App ID"
+  type        = string
+  default     = ""
+}
+
+variable "github_app_private_key" {
+  description = "GitHub App private key (PEM-encoded)"
   type        = string
   sensitive   = true
+  default     = ""
+}
+
+variable "github_app_installation_id" {
+  description = "GitHub App installation ID for the dragonflyic org"
+  type        = string
   default     = ""
 }
 

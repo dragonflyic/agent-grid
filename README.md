@@ -59,7 +59,9 @@ All configuration is done via environment variables with the `AGENT_GRID_` prefi
 | `DATABASE_URL` | `postgresql://postgres:dev@localhost:5432/agent_grid` | PostgreSQL connection URL |
 | `ISSUE_TRACKER_TYPE` | `filesystem` | Issue tracker backend: `filesystem` or `github` |
 | `ISSUES_DIRECTORY` | `./issues` | Directory for filesystem issue tracker |
-| `GITHUB_TOKEN` | - | GitHub API token (required for github tracker) |
+| `GITHUB_APP_ID` | - | GitHub App ID (required for github tracker) |
+| `GITHUB_APP_PRIVATE_KEY` | - | GitHub App private key PEM content |
+| `GITHUB_APP_INSTALLATION_ID` | - | GitHub App installation ID for org |
 | `GITHUB_WEBHOOK_SECRET` | - | Secret for webhook signature verification |
 | `MAX_CONCURRENT_EXECUTIONS` | `5` | Maximum concurrent agent executions |
 | `EXECUTION_TIMEOUT_SECONDS` | `3600` | Execution timeout (1 hour) |
@@ -120,7 +122,9 @@ For production use with GitHub Issues:
 
 ```bash
 export AGENT_GRID_ISSUE_TRACKER_TYPE=github
-export AGENT_GRID_GITHUB_TOKEN=your_token
+export AGENT_GRID_GITHUB_APP_ID=your_app_id
+export AGENT_GRID_GITHUB_APP_PRIVATE_KEY="$(cat path/to/private-key.pem)"
+export AGENT_GRID_GITHUB_APP_INSTALLATION_ID=your_installation_id
 ```
 
 ## Development
