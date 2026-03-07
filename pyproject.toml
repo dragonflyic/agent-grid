@@ -17,6 +17,7 @@ claude-code-sdk = "^0.0.25"
 asyncpg = "^0.30"
 pyyaml = "^6.0"
 anthropic = "^0.52"
+PyJWT = {version = "^2.8", extras = ["crypto"]}
 oz-agent-sdk = "^0.6"
 alembic = "^1.14"
 sqlalchemy = "^2.0"  # Async ORM for database access
