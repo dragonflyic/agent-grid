@@ -41,6 +41,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate GitHub App token for Terraform provider
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.TF_VAR_GITHUB_APP_ID }}
+          private_key: ${{ secrets.TF_VAR_GITHUB_APP_PRIVATE_KEY }}
+          installation_retrieval_mode: id
+          installation_retrieval_payload: ${{ secrets.TF_VAR_GITHUB_APP_INSTALLATION_ID }}
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -59,6 +68,8 @@ jobs:
       - name: Tofu Plan
         id: plan
         working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_github_provider_token: ${{ steps.app-token.outputs.token }}
         run: |
           set +e
           OUTPUT=$(tofu plan -no-color 2>&1)
@@ -116,6 +127,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate GitHub App token for Terraform provider
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.TF_VAR_GITHUB_APP_ID }}
+          private_key: ${{ secrets.TF_VAR_GITHUB_APP_PRIVATE_KEY }}
+          installation_retrieval_mode: id
+          installation_retrieval_payload: ${{ secrets.TF_VAR_GITHUB_APP_INSTALLATION_ID }}
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -133,4 +153,6 @@ jobs:
 
       - name: Tofu Apply
         working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_github_provider_token: ${{ steps.app-token.outputs.token }}
         run: tofu apply -auto-approve -no-color
