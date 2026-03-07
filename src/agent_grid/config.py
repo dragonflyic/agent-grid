@@ -15,8 +15,10 @@ class Settings(BaseSettings):
     issue_tracker_type: Literal["github", "filesystem"] = "filesystem"
     issues_directory: str = "./issues"
 
-    # GitHub (only used when issue_tracker_type is "github")
-    github_token: str = ""
+    # GitHub App authentication (only used when issue_tracker_type is "github")
+    github_app_id: str = ""
+    github_app_private_key: str = ""  # PEM-encoded private key content
+    github_app_installation_id: str = ""
     github_webhook_secret: str = ""
 
     # Execution limits
