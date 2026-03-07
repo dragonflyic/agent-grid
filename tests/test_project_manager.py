@@ -1,5 +1,7 @@
 """Tests for GitHub Projects v2 integration (ProjectManager)."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from agent_grid.issue_tracker.project_manager import ProjectManager
@@ -54,6 +56,8 @@ def _make_project_manager(
 
     pm = ProjectManager.__new__(ProjectManager)
     http = FakeHTTPClient(responses=responses)
+    pm._app_auth = "fake"  # prevent lazy-load
+    pm._ensure_auth = AsyncMock()  # no-op auth for tests
     pm._client = http
     pm._project_number = project_number
     pm._project_owner = project_owner

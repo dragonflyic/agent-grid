@@ -20,7 +20,9 @@ stacks:
 
     # Environment variables (configure in Spacelift UI)
     # TF_VAR_database_password: (sensitive - set in Spacelift)
-    # TF_VAR_github_token: (sensitive - set in Spacelift)
+    # TF_VAR_github_app_id: (sensitive - set in Spacelift)
+    # TF_VAR_github_app_private_key: (sensitive - set in Spacelift)
+    # TF_VAR_github_app_installation_id: (sensitive - set in Spacelift)
     # TF_VAR_github_webhook_secret: (sensitive - set in Spacelift)
 
     # Labels for organization

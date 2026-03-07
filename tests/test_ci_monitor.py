@@ -1,5 +1,7 @@
 """Tests for CI failure polling (CIMonitor)."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from agent_grid.coordinator.ci_monitor import CIMonitor
@@ -78,6 +80,9 @@ def _make_monitor(prs=None, check_runs_by_sha=None, states=None):
     http = FakeHTTPClient(prs=prs, check_runs_by_sha=check_runs_by_sha)
     # Create a GitHubClient-like object that passes isinstance
     fake_gh = GitHubClient.__new__(GitHubClient)
+    fake_gh._static_token = "fake"
+    fake_gh._app_auth = None
+    fake_gh._ensure_auth = AsyncMock()
     fake_gh._client = http
 
     async def _get_check_runs(repo, ref, *, status="completed"):

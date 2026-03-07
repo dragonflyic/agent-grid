@@ -36,6 +36,12 @@ class FlyMachinesClient:
             timeout=60.0,
         )
 
+    async def _get_github_token(self) -> str:
+        """Get a fresh GitHub installation token for the worker."""
+        from ..github_app import get_github_app_auth
+
+        return await get_github_app_auth().get_installation_token()
+
     async def spawn_worker(
         self,
         execution_id: str,
@@ -60,7 +66,7 @@ class FlyMachinesClient:
                     "PROMPT": prompt,
                     "CONTEXT_JSON": context_json,
                     "ANTHROPIC_API_KEY": settings.anthropic_api_key,
-                    "GITHUB_TOKEN": settings.github_token,
+                    "GITHUB_TOKEN": await self._get_github_token(),
                     "ORCHESTRATOR_URL": settings.coordinator_url or f"https://{self._app_name}.fly.dev",
                     "AGENT_BYPASS_PERMISSIONS": "true",
                 },

@@ -21,9 +21,9 @@ class ProjectManager:
     """Manages items on a GitHub Projects v2 board via GraphQL."""
 
     def __init__(self):
+        self._app_auth = None  # lazy-loaded
         self._client = httpx.AsyncClient(
             headers={
-                "Authorization": f"Bearer {settings.github_token}",
                 "Content-Type": "application/json",
             },
             timeout=30.0,
@@ -36,6 +36,15 @@ class ProjectManager:
         self._initialized = False
         self._label_status_map: dict[str, str] = self._parse_label_map()
 
+    async def _ensure_auth(self) -> None:
+        """Ensure the client has a valid Authorization header."""
+        from ..github_app import get_github_app_auth
+
+        if self._app_auth is None:
+            self._app_auth = get_github_app_auth()
+        token = await self._app_auth.get_installation_token()
+        self._client.headers["Authorization"] = f"Bearer {token}"
+
     @staticmethod
     def _parse_label_map() -> dict[str, str]:
         try:
@@ -47,6 +56,7 @@ class ProjectManager:
         return bool(self._project_number and self._project_owner)
 
     async def _graphql(self, query: str, variables: dict | None = None) -> dict | None:
+        await self._ensure_auth()
         try:
             payload: dict = {"query": query}
             if variables:
