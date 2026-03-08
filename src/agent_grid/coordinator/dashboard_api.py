@@ -84,6 +84,8 @@ async def list_issues(
     offset: int = 0,
 ) -> dict:
     """Paginated open issues merged with DB state. Returns {items, total}."""
+    import traceback
+
     from ..config import settings
     from ..issue_tracker import get_issue_tracker
     from ..issue_tracker.public_api import IssueStatus
@@ -93,54 +95,62 @@ async def list_issues(
     if not actual_repo:
         raise HTTPException(status_code=400, detail="No target_repo configured")
 
-    db = get_database()
-    tracker = get_issue_tracker()
+    try:
+        db = get_database()
+        tracker = get_issue_tracker()
 
-    all_open = await tracker.list_issues(actual_repo, status=IssueStatus.OPEN)
-    all_states = await db.list_all_issue_states(actual_repo, limit=9999)
-    state_map = {s["issue_number"]: s for s in all_states}
-    exec_counts = await db.get_execution_counts_by_issue()
+        all_open = await tracker.list_issues(actual_repo, status=IssueStatus.OPEN)
+        all_states = await db.list_all_issue_states(actual_repo, limit=9999)
+        state_map = {s["issue_number"]: s for s in all_states}
+        exec_counts = await db.get_execution_counts_by_issue()
 
-    results = []
-    for issue in all_open:
-        state = state_map.get(issue.number, {})
-        issue_class = state.get("classification")
+        results = []
+        for issue in all_open:
+            state = state_map.get(issue.number, {})
+            issue_class = state.get("classification")
 
-        if classification and issue_class != classification:
-            continue
-
-        ag_labels = [la for la in issue.labels if la.startswith("ag/")]
-        pipeline_stage = _derive_stage(ag_labels)
-
-        if stage and pipeline_stage != stage:
-            continue
-
-        if search:
-            q = search.lower()
-            if q not in (issue.title or "").lower() and q not in str(issue.number):
+            if classification and issue_class != classification:
                 continue
 
-        metadata = state.get("metadata") or {}
-        results.append(
-            {
-                "issue_number": issue.number,
-                "title": issue.title,
-                "author": issue.author,
-                "labels": issue.labels,
-                "ag_labels": ag_labels,
-                "pipeline_stage": pipeline_stage,
-                "classification": issue_class,
-                "confidence_score": metadata.get("confidence_score"),
-                "confidence_verdict": metadata.get("confidence_verdict"),
-                "retry_count": state.get("retry_count", 0),
-                "last_checked_at": state.get("last_checked_at"),
-                "execution_count": exec_counts.get(str(issue.number), 0),
-                "created_at": issue.created_at.isoformat() if issue.created_at else None,
-            }
-        )
+            ag_labels = [la for la in issue.labels if la.startswith("ag/")]
+            pipeline_stage = _derive_stage(ag_labels)
 
-    results.sort(key=lambda x: x["issue_number"], reverse=True)
-    return {"items": results[offset : offset + limit], "total": len(results)}
+            if stage and pipeline_stage != stage:
+                continue
+
+            if search:
+                q = search.lower()
+                if q not in (issue.title or "").lower() and q not in str(issue.number):
+                    continue
+
+            metadata = state.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            results.append(
+                {
+                    "issue_number": issue.number,
+                    "title": issue.title,
+                    "author": issue.author,
+                    "labels": issue.labels,
+                    "ag_labels": ag_labels,
+                    "pipeline_stage": pipeline_stage,
+                    "classification": issue_class,
+                    "confidence_score": metadata.get("confidence_score"),
+                    "confidence_verdict": metadata.get("confidence_verdict"),
+                    "retry_count": state.get("retry_count", 0),
+                    "last_checked_at": state.get("last_checked_at"),
+                    "execution_count": exec_counts.get(str(issue.number), 0),
+                    "created_at": issue.created_at.isoformat() if issue.created_at else None,
+                }
+            )
+
+        results.sort(key=lambda x: x["issue_number"], reverse=True)
+        return {"items": results[offset : offset + limit], "total": len(results)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Dashboard /issues endpoint failed")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
 
 
 @dashboard_router.get("/issues/{issue_number}")
