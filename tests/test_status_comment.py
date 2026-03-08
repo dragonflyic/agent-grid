@@ -8,6 +8,7 @@ from agent_grid.coordinator.status_comment import (
     MARKER,
     METADATA_KEY,
     StatusCommentManager,
+    _extract_comment_id,
     _render_status,
 )
 
@@ -34,6 +35,31 @@ class TestRenderStatus:
     def test_unknown_stage_fallback(self):
         body = _render_status("unknown_stage")
         assert "Update" in body
+
+
+class TestExtractCommentId:
+    """Tests for extracting comment ID from various metadata shapes."""
+
+    def test_dict_metadata(self):
+        assert _extract_comment_id({METADATA_KEY: "123"}) == "123"
+
+    def test_list_metadata(self):
+        metadata = [None, {"confidence_score": 9}, {METADATA_KEY: "456"}]
+        assert _extract_comment_id(metadata) == "456"
+
+    def test_none_metadata(self):
+        assert _extract_comment_id(None) is None
+
+    def test_empty_dict(self):
+        assert _extract_comment_id({}) is None
+
+    def test_empty_list(self):
+        assert _extract_comment_id([]) is None
+
+    def test_string_json_dict(self):
+        import json
+
+        assert _extract_comment_id(json.dumps({METADATA_KEY: "789"})) == "789"
 
 
 class TestStatusCommentManager:
@@ -134,6 +160,24 @@ class TestStatusCommentManager:
 
             mock_tracker.update_comment.assert_called_once()
             assert mock_tracker.update_comment.call_args[0][1] == "77777"
+
+    @pytest.mark.asyncio
+    async def test_handles_list_metadata(self, mock_tracker, mock_db):
+        """Metadata stored as a list (JSONB concat artifact) is parsed correctly."""
+        mock_db.get_issue_state.return_value = {
+            "metadata": [None, {"confidence_score": 9}, {METADATA_KEY: "88888"}],
+        }
+
+        with (
+            patch("agent_grid.coordinator.status_comment.get_issue_tracker", return_value=mock_tracker),
+            patch("agent_grid.coordinator.status_comment.get_database", return_value=mock_db),
+        ):
+            mgr = StatusCommentManager()
+            await mgr.post_or_update("owner/repo", "42", "pr_created")
+
+            mock_tracker.update_comment.assert_called_once()
+            assert mock_tracker.update_comment.call_args[0][1] == "88888"
+            mock_tracker.add_comment.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_crash_on_add_comment_failure(self, mock_tracker, mock_db):
