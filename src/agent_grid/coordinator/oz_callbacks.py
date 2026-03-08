@@ -65,7 +65,11 @@ def build_oz_callbacks(db, tracker) -> OzCallbacks:
                             and hasattr(tracker, "create_pr")
                         ):
                             await _create_pr_for_execution(
-                                tracker, repo, issue_id, candidates, artifacts,
+                                tracker,
+                                repo,
+                                issue_id,
+                                candidates,
+                                artifacts,
                                 execution_id,
                             )
             except Exception as e:
@@ -103,8 +107,11 @@ def build_oz_callbacks(db, tracker) -> OzCallbacks:
             logger.warning(f"Failed to update DB for execution {execution_id}: {e}")
 
     async def _create_pr_for_execution(
-        tracker_ref, repo: str, issue_id: str,
-        candidate_branches: tuple, artifacts: RunArtifacts,
+        tracker_ref,
+        repo: str,
+        issue_id: str,
+        candidate_branches: tuple,
+        artifacts: RunArtifacts,
         execution_id: UUID,
     ) -> None:
         """Create a PR using the App installation token (shows as bot account)."""
@@ -130,10 +137,7 @@ def build_oz_callbacks(db, tracker) -> OzCallbacks:
                     artifacts.pr_number = pr_data["number"]
                     artifacts.branch = branch
                     artifacts.pr_url = pr_data.get("html_url")
-                    logger.info(
-                        f"Created PR #{artifacts.pr_number} on {branch} "
-                        f"for execution {execution_id} (as bot)"
-                    )
+                    logger.info(f"Created PR #{artifacts.pr_number} on {branch} for execution {execution_id} (as bot)")
                     break
         except Exception as e:
             logger.warning(f"Failed to create PR for execution {execution_id}: {e}")
