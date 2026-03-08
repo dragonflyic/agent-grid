@@ -145,7 +145,7 @@ class IssueTracker(ABC):
         pass
 
     @abstractmethod
-    async def add_comment(self, repo: str, issue_id: str, body: str) -> None:
+    async def add_comment(self, repo: str, issue_id: str, body: str) -> str | None:
         """
         Add a comment to an issue.
 
@@ -153,6 +153,20 @@ class IssueTracker(ABC):
             repo: Repository in owner/name format.
             issue_id: Issue number or ID.
             body: Comment body.
+
+        Returns:
+            Comment ID as string, or None.
+        """
+        pass
+
+    async def update_comment(self, repo: str, comment_id: str, body: str) -> None:
+        """
+        Update an existing comment by ID.
+
+        Args:
+            repo: Repository in owner/name format.
+            comment_id: Comment ID.
+            body: New comment body.
         """
         pass
 

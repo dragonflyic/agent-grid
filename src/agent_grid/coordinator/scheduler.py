@@ -294,6 +294,7 @@ class Scheduler:
             tracker = get_issue_tracker()
             await tracker.add_label(repo, str(pr_number), "ag/done")
             await tracker.update_issue_status(repo, issue_id, IssueStatus.CLOSED)
+            await self._update_status(repo, issue_id, "pr_merged", f"PR #{pr_number} has been merged.")
             logger.info(f"PR #{pr_number} merged — issue #{issue_id} marked ag/done")
             return
 
@@ -564,6 +565,13 @@ class Scheduler:
                                 await tracker.add_label(repo, str(pr_number), "ag/review-pending")
                             await self._assign_and_tag_owner(repo, issue_id, pr_number)
 
+                        # Update status comment
+                        detail = f"PR #{pr_number} created." if pr_number else None
+                        stage = "completed" if execution.mode == "plan" else "review_pending"
+                        if pr_number:
+                            stage = "pr_created"
+                        await self._update_status(repo, issue_id, stage, detail)
+
         # Process any pending nudges now that we have capacity
         await self._process_pending_nudges()
 
@@ -614,12 +622,25 @@ class Scheduler:
                     if repo:
                         labels_mgr = get_label_manager()
                         await labels_mgr.transition_to(repo, issue_id, "ag/failed")
+                        error_msg = payload.get("error", "")
+                        detail = f"Agent failed: {error_msg}" if error_msg else None
+                        await self._update_status(repo, issue_id, "failed", detail)
 
         await self._process_pending_nudges()
 
     # -------------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------------
+
+    async def _update_status(self, repo: str, issue_id: str, stage: str, detail: str | None = None) -> None:
+        """Update the status comment on the issue (fire-and-forget)."""
+        try:
+            from .status_comment import get_status_comment_manager
+
+            mgr = get_status_comment_manager()
+            await mgr.post_or_update(repo, issue_id, stage, detail)
+        except Exception:
+            logger.warning(f"Failed to update status comment for issue #{issue_id}", exc_info=True)
 
     async def _try_launch_agent(self, issue_id: str, repo: str) -> bool:
         """Attempt to launch an agent for an issue.

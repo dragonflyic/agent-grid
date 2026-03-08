@@ -311,11 +311,22 @@ class GitHubClient(IssueTracker):
 
         return await self.get_issue(repo, issue_id)
 
-    async def add_comment(self, repo: str, issue_id: str, body: str) -> None:
-        """Add a comment to an issue."""
+    async def add_comment(self, repo: str, issue_id: str, body: str) -> str | None:
+        """Add a comment to an issue. Returns the comment ID or None."""
         await self._ensure_auth()
         response = await self._client.post(
             f"/repos/{repo}/issues/{issue_id}/comments",
+            json={"body": body},
+        )
+        response.raise_for_status()
+        data = response.json()
+        return str(data["id"]) if data.get("id") else None
+
+    async def update_comment(self, repo: str, comment_id: str, body: str) -> None:
+        """Update an existing comment by ID."""
+        await self._ensure_auth()
+        response = await self._client.patch(
+            f"/repos/{repo}/issues/comments/{comment_id}",
             json={"body": body},
         )
         response.raise_for_status()

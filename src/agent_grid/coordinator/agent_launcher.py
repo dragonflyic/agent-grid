@@ -97,7 +97,28 @@ class AgentLauncher:
             "launch",
             {"mode": mode, "execution_id": str(execution_id)},
         )
+
+        # Post status comment on the issue
+        stage_map = {
+            "implement": "launched",
+            "plan": "planning",
+            "fix_ci": "ci_fix",
+            "address_review": "addressing_review",
+            "retry_with_feedback": "retrying",
+        }
+        await self._post_status(repo, issue_id, stage_map.get(mode, "in_progress"))
+
         return True
+
+    async def _post_status(self, repo: str, issue_id: str, stage: str, detail: str | None = None) -> None:
+        """Post or update the status comment on the issue (fire-and-forget)."""
+        try:
+            from .status_comment import get_status_comment_manager
+
+            mgr = get_status_comment_manager()
+            await mgr.post_or_update(repo, issue_id, stage, detail)
+        except Exception:
+            logger.warning(f"Failed to post status comment for issue #{issue_id}", exc_info=True)
 
     async def has_active_execution(self, issue_id: str) -> bool:
         """Check if there's already a running/pending execution for this issue."""
