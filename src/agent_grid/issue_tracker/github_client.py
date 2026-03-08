@@ -374,6 +374,44 @@ class GitHubClient(IssueTracker):
         except Exception as e:
             logger.warning(f"Failed to request reviewers on PR #{pr_number}: {e}")
 
+    async def create_pr(
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        head: str,
+        base: str = "main",
+        labels: list[str] | None = None,
+        reviewers: list[str] | None = None,
+    ) -> dict | None:
+        """Create a pull request. Returns the PR data dict or None on failure."""
+        await self._ensure_auth()
+        try:
+            response = await self._client.post(
+                f"/repos/{repo}/pulls",
+                json={
+                    "title": title,
+                    "body": body,
+                    "head": head,
+                    "base": base,
+                },
+            )
+            response.raise_for_status()
+            pr_data = response.json()
+            pr_number = pr_data["number"]
+
+            if labels:
+                for label in labels:
+                    await self.add_label(repo, str(pr_number), label)
+
+            if reviewers:
+                await self.request_pr_reviewers(repo, pr_number, reviewers)
+
+            return pr_data
+        except Exception as e:
+            logger.error(f"Failed to create PR for {repo} from {head}: {e}")
+            return None
+
     async def get_pr_by_branch(self, repo: str, branch: str) -> dict | None:
         """Find an open PR for the given head branch.
 
