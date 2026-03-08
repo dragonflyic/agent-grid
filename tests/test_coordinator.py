@@ -417,7 +417,7 @@ class TestPlanModePrompt:
 
 
 class TestPRCreationPrompt:
-    """Tests for PR creation prompt using proper GitHub fields."""
+    """Tests for PR creation — coordinator creates PRs, not the agent."""
 
     def _make_issue(self, author=""):
         from agent_grid.issue_tracker.public_api import IssueInfo
@@ -433,29 +433,23 @@ class TestPRCreationPrompt:
             author=author,
         )
 
-    def test_implement_prompt_includes_reviewer_flag(self):
-        """gh pr create should include --reviewer when author is present."""
+    def test_implement_prompt_does_not_create_pr(self):
+        """Agent should not run gh pr create — coordinator handles it."""
         from agent_grid.coordinator.prompt_builder import build_prompt
 
         prompt = build_prompt(self._make_issue(author="alice"), "owner/repo", mode="implement")
-        assert "--reviewer alice" in prompt
+        assert "gh pr create" not in prompt
+        assert "Do NOT create a PR" in prompt
 
-    def test_implement_prompt_no_reviewer_when_no_author(self):
-        """gh pr create should omit --reviewer when author is empty."""
-        from agent_grid.coordinator.prompt_builder import build_prompt
-
-        prompt = build_prompt(self._make_issue(author=""), "owner/repo", mode="implement")
-        assert "--reviewer" not in prompt
-
-    def test_implement_prompt_includes_label_flag(self):
-        """gh pr create should include --label for status tracking."""
+    def test_implement_prompt_pushes_branch(self):
+        """Agent should push the branch so coordinator can create the PR."""
         from agent_grid.coordinator.prompt_builder import build_prompt
 
         prompt = build_prompt(self._make_issue(), "owner/repo", mode="implement")
-        assert '--label "ag/review-pending"' in prompt
+        assert "git push" in prompt
 
-    def test_retry_prompt_includes_reviewer_flag(self):
-        """Retry mode gh pr create should also include --reviewer."""
+    def test_retry_prompt_does_not_create_pr(self):
+        """Retry mode should also not create PR — coordinator handles it."""
         from agent_grid.coordinator.prompt_builder import build_prompt
 
         prompt = build_prompt(
@@ -464,26 +458,8 @@ class TestPRCreationPrompt:
             mode="retry_with_feedback",
             context={"closed_pr_number": 3, "human_feedback": "wrong"},
         )
-        assert "--reviewer bob" in prompt
-
-    def test_retry_prompt_includes_label_flag(self):
-        """Retry mode gh pr create should include --label."""
-        from agent_grid.coordinator.prompt_builder import build_prompt
-
-        prompt = build_prompt(
-            self._make_issue(),
-            "owner/repo",
-            mode="retry_with_feedback",
-            context={"closed_pr_number": 3, "human_feedback": "wrong"},
-        )
-        assert '--label "ag/review-pending"' in prompt
-
-    def test_no_cc_author_in_body(self):
-        """PR body should not contain 'cc @author' — use --reviewer instead."""
-        from agent_grid.coordinator.prompt_builder import build_prompt
-
-        prompt = build_prompt(self._make_issue(author="alice"), "owner/repo", mode="implement")
-        assert "cc @alice" not in prompt
+        assert "gh pr create" not in prompt
+        assert "Do NOT create a PR" in prompt
 
 
 class TestPlannerBlockedBy:

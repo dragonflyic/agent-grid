@@ -21,11 +21,6 @@ def build_prompt(
     context = context or {}
     branch_name = f"agent/{issue.number}"
 
-    # PR flags for reviewer and label
-    # Use explicit reviewer override (e.g., parent issue owner for sub-issues)
-    reviewer = context.get("reviewer") or issue.author
-    reviewer_flag = f" --reviewer {reviewer}" if reviewer else ""
-
     # Format clarification thread if present
     clarification = ""
     if context.get("clarification_comments"):
@@ -56,11 +51,9 @@ Issue #{issue.number}: {issue.title}
    - Explain exactly what you need answered
    - Then EXIT
 7. When done:
-   - Push your branch and create a PR that closes the issue.
-   - Create PR with proper fields set:
-     gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/review-pending"{reviewer_flag}
-   - **EXIT immediately after the PR is created.** Do not continue working.
-     Your job is done once the PR exists. CI will run automatically.
+   - Push your branch.
+   - Do NOT create a PR — the coordinator will create it automatically.
+   - **EXIT immediately after pushing.** Do not continue working.
 
 ## Git Identity
 Before making any commits, configure your git identity:
@@ -296,13 +289,13 @@ Take a DIFFERENT approach based on the feedback. Start fresh:
 git checkout -b {new_branch}
 ```
 
-After implementation, push and create a PR with proper fields:
+After implementation, push your branch:
 ```bash
 git push -u origin {new_branch}
-gh pr create --title "..." --body "Closes #{issue.number}" --label "ag/review-pending"{reviewer_flag}
 ```
 
-**EXIT immediately after the PR is created.** Your job is done. CI will run automatically.
+Do NOT create a PR — the coordinator will create it automatically.
+**EXIT immediately after pushing.** Your job is done.
 """
         )
         return prompt
