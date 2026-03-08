@@ -64,6 +64,26 @@ def _render_status(stage: str, detail: str | None = None) -> str:
 <sub>Updated by [agent-grid](https://github.com/apps/agent-grid) | [Dashboard](https://agent-grid.fly.dev)</sub>"""
 
 
+def _extract_comment_id(raw_metadata) -> str | None:
+    """Extract status_comment_id from metadata, handling dict, list, or string forms."""
+    if raw_metadata is None:
+        return None
+    if isinstance(raw_metadata, str):
+        import json
+
+        try:
+            raw_metadata = json.loads(raw_metadata)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if isinstance(raw_metadata, dict):
+        return raw_metadata.get(METADATA_KEY)
+    if isinstance(raw_metadata, list):
+        for item in raw_metadata:
+            if isinstance(item, dict) and METADATA_KEY in item:
+                return item[METADATA_KEY]
+    return None
+
+
 class StatusCommentManager:
     """Manages a single status comment per issue."""
 
@@ -83,13 +103,8 @@ class StatusCommentManager:
         # Check if we already have a comment ID stored in metadata
         issue_number = int(issue_id)
         state = await db.get_issue_state(issue_number, repo)
-        metadata = (state or {}).get("metadata") or {}
-        if isinstance(metadata, str):
-            import json
-
-            metadata = json.loads(metadata)
-
-        comment_id = metadata.get(METADATA_KEY) if isinstance(metadata, dict) else None
+        raw_metadata = (state or {}).get("metadata")
+        comment_id = _extract_comment_id(raw_metadata)
 
         if comment_id:
             try:
