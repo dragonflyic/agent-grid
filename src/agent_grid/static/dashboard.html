@@ -502,13 +502,15 @@ function populateClassFilter() {
 
 // ---- Issues ----
 
-async function loadIssues(page) {
+async function loadIssues(page, {silent = false} = {}) {
   if (page !== undefined) issuesPage = page;
   if (issuesLoading) return;
   issuesLoading = true;
 
   const tbody = document.getElementById('issues-body');
-  tbody.innerHTML = '<tr><td colspan="10" class="loading">Loading...</td></tr>';
+  if (!silent) {
+    tbody.innerHTML = '<tr><td colspan="10" class="loading">Loading...</td></tr>';
+  }
 
   const stage = document.getElementById('stage-filter').value;
   const classVal = document.getElementById('class-filter').value;
@@ -522,11 +524,13 @@ async function loadIssues(page) {
     const data = await fetchJSON(`${API}/issues?${params}`);
     currentIssues = data.items;
     issuesTotal = data.total;
-    selectedIssues.clear();
+    if (!silent) selectedIssues.clear();
     updateActivateBtn();
     renderIssues();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="10" class="error">${esc(e.message)}</td></tr>`;
+    if (!silent) {
+      tbody.innerHTML = `<tr><td colspan="10" class="error">${esc(e.message)}</td></tr>`;
+    }
   } finally {
     issuesLoading = false;
   }
@@ -964,17 +968,22 @@ async function loadTimeline(executionId, containerId) {
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-async function refresh() {
+async function refresh(initial = false) {
   document.getElementById('last-refresh').textContent = fmtRelative(new Date().toISOString());
   resetRefreshBar();
-  await Promise.all([loadOverview(), loadIssues(), loadActivity(), loadExecutions()]);
+  if (initial) {
+    await Promise.all([loadOverview(), loadIssues(), loadActivity(), loadExecutions()]);
+  } else {
+    // Silent refresh: don't flash "Loading..." or clear selections
+    await Promise.all([loadOverview(), loadIssues(undefined, {silent: true}), loadActivity(), loadExecutions()]);
+  }
 }
 
 // Keyboard: Escape closes modal
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 // Initial load
-refresh();
+refresh(true);
 
 // Auto-refresh: full every 60s, executions every 10s, durations every 1s
 setInterval(refresh, 60000);
