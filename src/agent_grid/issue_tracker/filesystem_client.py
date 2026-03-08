@@ -246,12 +246,13 @@ class FilesystemClient(IssueTracker):
 
         return issue
 
-    async def add_comment(self, repo: str, issue_id: str, body: str) -> None:
+    async def add_comment(self, repo: str, issue_id: str, body: str) -> str | None:
         """Add a comment to an issue."""
         issue = await self.get_issue(repo, issue_id)
 
+        comment_id = str(len(issue.comments) + 1)
         new_comment = Comment(
-            id=str(len(issue.comments) + 1),
+            id=comment_id,
             body=body,
             created_at=utc_now(),
         )
@@ -260,6 +261,7 @@ class FilesystemClient(IssueTracker):
 
         content = self._serialize_issue(issue)
         self._issue_path(issue_id).write_text(content)
+        return comment_id
 
     async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         """Update the status of an issue."""
