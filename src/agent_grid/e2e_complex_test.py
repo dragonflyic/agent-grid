@@ -119,10 +119,7 @@ async def main():
         print(f"  Verdict: {sanity.verdict}")
         print(f"  Reason: {sanity.reason}")
         if sanity.verdict == "SKIP":
-            print(
-                "\n  Note: Issue sanity check returned SKIP. "
-                "Running planner anyway for testing.\n"
-            )
+            print("\n  Note: Issue sanity check returned SKIP. Running planner anyway for testing.\n")
 
     # -- Phase 4: Run planner to decompose --------------------------------
     print(f"\n{'~' * 60}")

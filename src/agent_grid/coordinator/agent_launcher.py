@@ -433,7 +433,7 @@ class AgentLauncher:
         # Strip markdown code fences if present
         if json_text.startswith("```"):
             lines = json_text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
+            lines = [line for line in lines if not line.strip().startswith("```")]
             json_text = "\n".join(lines).strip()
         try:
             return json.loads(json_text)
@@ -441,9 +441,7 @@ class AgentLauncher:
             logger.error(f"Failed to parse scout result: {e}")
             return None
 
-    async def handle_scout_completed(
-        self, repo: str, issue_id: str, execution_id, scout_result: dict
-    ) -> None:
+    async def handle_scout_completed(self, repo: str, issue_id: str, execution_id, scout_result: dict) -> None:
         """Act on a scout agent's verdict."""
         verdict = scout_result.get("verdict", "implement")
         plan = scout_result.get("plan", "")
@@ -454,12 +452,15 @@ class AgentLauncher:
             await labels.transition_to(repo, issue_id, "ag/blocked")
             question = scout_result.get("question", scout_result.get("reason", ""))
             from ..issue_tracker.metadata import embed_metadata
+
             comment = embed_metadata(
                 f"**Agent needs clarification:**\n\n{question}",
                 {"type": "blocked", "reason": f"scout: {scout_result.get('reason', '')}"},
             )
             await self._tracker.add_comment(repo, issue_id, comment)
-            await self._post_status(repo, issue_id, "failed", f"Scout needs human input: {scout_result.get('reason', '')}")
+            await self._post_status(
+                repo, issue_id, "failed", f"Scout needs human input: {scout_result.get('reason', '')}"
+            )
             logger.info(f"Issue #{issue.number}: scout verdict=needs_human")
             return
 
@@ -495,9 +496,7 @@ class AgentLauncher:
         else:
             await labels.transition_to(repo, issue_id, "ag/todo")
 
-    async def _create_sequential_sub_issues(
-        self, repo: str, parent_issue, scout_result: dict
-    ) -> bool:
+    async def _create_sequential_sub_issues(self, repo: str, parent_issue, scout_result: dict) -> bool:
         """Create sub-issues from scout decomposition, first gets ag/todo, rest get ag/queued.
 
         Returns True if sub-issues were created successfully, False otherwise.
@@ -509,7 +508,7 @@ class AgentLauncher:
 
         sub_issue_order = []
         for i, step in enumerate(steps):
-            title = f"[Sub #{parent_issue.number}] {step.get('title', f'Step {i+1}')}"
+            title = f"[Sub #{parent_issue.number}] {step.get('title', f'Step {i + 1}')}"
             body_parts = [
                 f"Part of #{parent_issue.number}\n",
                 f"## Objective\n{step.get('description', '')}\n",
@@ -527,15 +526,16 @@ class AgentLauncher:
 
             try:
                 sub = await self._tracker.create_subissue(
-                    repo, parent_id=parent_issue.id, title=title, body=body, labels=label_list,
+                    repo,
+                    parent_id=parent_issue.id,
+                    title=title,
+                    body=body,
+                    labels=label_list,
                 )
                 sub_issue_order.append(sub.number)
                 if parent_issue.author:
                     await self._tracker.assign_issue(repo, str(sub.number), parent_issue.author)
-                logger.info(
-                    f"Created sub-issue #{sub.number}: {title} "
-                    f"({'ag/todo' if i == 0 else 'ag/queued'})"
-                )
+                logger.info(f"Created sub-issue #{sub.number}: {title} ({'ag/todo' if i == 0 else 'ag/queued'})")
             except Exception as e:
                 logger.error(f"Failed to create sub-issue for #{parent_issue.number}: {e}")
 
@@ -545,7 +545,8 @@ class AgentLauncher:
             # All sub-issue creations failed
             await labels_mgr.transition_to(repo, parent_issue.id, "ag/failed")
             await self._tracker.add_comment(
-                repo, parent_issue.id,
+                repo,
+                parent_issue.id,
                 "Failed to create any sub-issues during decomposition. Needs human intervention.",
             )
             return False
@@ -561,10 +562,7 @@ class AgentLauncher:
 
         # Post progress comment
         await self._post_progress_comment(repo, parent_issue, sub_issue_order, steps)
-        logger.info(
-            f"Issue #{parent_issue.number}: decomposed into {len(sub_issue_order)} "
-            f"sequential sub-issues"
-        )
+        logger.info(f"Issue #{parent_issue.number}: decomposed into {len(sub_issue_order)} sequential sub-issues")
         return True
 
     async def _post_progress_comment(
@@ -573,14 +571,14 @@ class AgentLauncher:
         """Post a progress tracking comment on the parent issue."""
         lines = [f"## Implementation Plan ({len(sub_issue_order)} steps)\n"]
         for i, (num, step) in enumerate(zip(sub_issue_order, steps)):
-            title = step.get("title", f"Step {i+1}")
+            title = step.get("title", f"Step {i + 1}")
             if i == 0:
                 icon = "\U0001f7e1"  # yellow circle — next up
                 status = "next up"
             else:
                 icon = "\u23f3"  # hourglass — queued
                 status = "queued"
-            lines.append(f"{i+1}. {icon} #{num} {title} — {status}")
+            lines.append(f"{i + 1}. {icon} #{num} {title} — {status}")
 
         lines.append("\nSteps execute sequentially. Merge each PR to trigger the next step.")
 

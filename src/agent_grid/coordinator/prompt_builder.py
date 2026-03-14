@@ -221,7 +221,7 @@ gh issue edit {issue.number} --repo {repo} --remove-label "ag/planning"
 A scout agent has already explored the codebase and produced this plan for you.
 Follow this plan — it reflects the actual codebase state:
 
-{context['scout_plan']}
+{context["scout_plan"]}
 """
 
         return (
