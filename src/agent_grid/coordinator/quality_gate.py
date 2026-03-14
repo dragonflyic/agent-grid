@@ -19,7 +19,6 @@ import anthropic
 from ..config import settings
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.public_api import IssueInfo
-from .classifier import Classification
 
 logger = logging.getLogger("agent_grid.quality_gate")
 
@@ -110,14 +109,14 @@ class QualityGate:
     async def evaluate(
         self,
         issue: IssueInfo,
-        classification: Classification,
+        classification: str = "SIMPLE",
         is_proactive: bool = False,
     ) -> ConfidenceAssessment:
         """Evaluate an issue's confidence for agent execution.
 
         Args:
             issue: The GitHub issue to evaluate.
-            classification: Result from the classifier.
+            classification: Classification category string (e.g. "SIMPLE").
             is_proactive: True if this is a proactive scan (higher bar).
 
         Returns:
@@ -130,7 +129,7 @@ class QualityGate:
             title=issue.title,
             body=issue.body or "(no description)",
             labels=", ".join(issue.labels) if issue.labels else "(none)",
-            classification=classification.category,
+            classification=classification,
             is_sub_issue=issue.parent_id is not None,
             nesting_depth=nesting_depth,
         )
