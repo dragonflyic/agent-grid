@@ -309,11 +309,11 @@ async def classify_issues(request: ClassifyRequest, repo: str | None = None) -> 
     for num in request.issue_numbers:
         try:
             issue = await tracker.get_issue(actual_repo, str(num))
-            classification = await classifier.classify(issue, actual_repo)
+            sanity = await classifier.sanity_check(issue)
             await db.upsert_issue_state(
                 issue_number=num,
                 repo=actual_repo,
-                classification=classification.category,
+                classification=sanity.verdict,
             )
             await db.record_pipeline_event(
                 issue_number=num,
@@ -321,18 +321,11 @@ async def classify_issues(request: ClassifyRequest, repo: str | None = None) -> 
                 event_type="manual_classify",
                 stage="manual",
                 detail={
-                    "category": classification.category,
-                    "reason": classification.reason,
-                    "estimated_complexity": classification.estimated_complexity,
+                    "verdict": sanity.verdict,
+                    "reason": sanity.reason,
                 },
             )
-            results.append(
-                {
-                    "issue_number": num,
-                    "classification": classification.category,
-                    "reason": classification.reason,
-                }
-            )
+            results.append({"issue_number": num, "verdict": sanity.verdict, "reason": sanity.reason})
         except Exception as e:
             results.append({"issue_number": num, "error": str(e)})
 
