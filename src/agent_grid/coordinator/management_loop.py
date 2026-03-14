@@ -23,7 +23,6 @@ from ..config import settings
 from ..execution_grid import get_execution_grid, utc_now
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
-from ..issue_tracker.metadata import embed_metadata
 from .agent_launcher import get_agent_launcher
 from .blocker_resolver import get_blocker_resolver
 from .budget_manager import get_budget_manager
@@ -86,7 +85,7 @@ class ManagementLoop:
         candidates = await scanner.scan(repo)
         logger.info(f"Phase 1: Found {len(candidates)} candidate issues")
 
-        # Phase 2 + 3: Classify, quality-gate, and act
+        # Phase 2: Sanity check and launch scouts
         classifier = get_classifier()
         budget = get_budget_manager()
         labels = get_label_manager()
@@ -98,57 +97,29 @@ class ManagementLoop:
                 await self._db.record_pipeline_event(issue.number, repo, "budget_blocked", "launch", {"reason": reason})
                 break
 
-            classification = await classifier.classify(issue, repo)
+            sanity = await classifier.sanity_check(issue)
 
             await self._db.upsert_issue_state(
                 issue_number=issue.number,
                 repo=repo,
-                classification=classification.category,
+                classification=sanity.verdict,
             )
             await self._db.record_pipeline_event(
-                issue.number,
-                repo,
-                "classified",
-                "classify",
-                {
-                    "category": classification.category,
-                    "reason": classification.reason,
-                    "estimated_complexity": classification.estimated_complexity,
-                },
+                issue.number, repo, "sanity_check", "classify",
+                {"verdict": sanity.verdict, "reason": sanity.reason},
             )
 
-            if classification.category == "SKIP":
+            if sanity.verdict == "SKIP":
                 await labels.transition_to(repo, issue.id, "ag/skipped")
                 await self._tracker.add_comment(
-                    repo,
-                    issue.id,
-                    f"Skipping automated work: {classification.reason}",
+                    repo, issue.id,
+                    f"Skipping: {sanity.reason}",
                 )
-                logger.info(f"Issue #{issue.number}: SKIPPED — {classification.reason}")
+                logger.info(f"Issue #{issue.number}: SKIPPED — {sanity.reason}")
                 continue
 
-            if classification.category == "BLOCKED":
-                await labels.transition_to(repo, issue.id, "ag/blocked")
-                question = classification.blocking_question or classification.reason
-                comment = embed_metadata(
-                    f"**Agent needs clarification:**\n\n{question}",
-                    {"type": "blocked", "reason": classification.reason},
-                )
-                await self._tracker.add_comment(repo, issue.id, comment)
-                logger.info(f"Issue #{issue.number}: BLOCKED — posted question")
-                continue
-
-            if settings.quality_gate_enabled:
-                gate_result = await launcher.run_quality_gate(repo, issue, classification, is_proactive=False)
-                if gate_result == "blocked":
-                    continue
-                if gate_result == "skipped":
-                    continue
-
-            if classification.category == "SIMPLE":
-                await launcher.launch_simple(repo, issue)
-            elif classification.category == "COMPLEX":
-                await launcher.launch_planner(repo, issue)
+            # Launch scout agent
+            await launcher.launch_scout(repo, issue)
 
         # Phase 4: Monitor in-progress
         await self._check_in_progress(repo)
@@ -270,6 +241,7 @@ class ManagementLoop:
         classifier = get_classifier()
         budget = get_budget_manager()
         labels = get_label_manager()
+        launcher = get_agent_launcher()
 
         candidates = await proactive_scanner.scan(repo)
         picked_up = 0
@@ -283,29 +255,16 @@ class ManagementLoop:
                 logger.info(f"Proactive scan: budget limit reached: {reason}")
                 break
 
-            # Classify first
-            classification = await classifier.classify(issue, repo)
+            # Sanity check
+            sanity = await classifier.sanity_check(issue)
 
             await self._db.upsert_issue_state(
                 issue_number=issue.number,
                 repo=repo,
-                classification=classification.category,
+                classification=sanity.verdict,
             )
 
-            if classification.category in ("BLOCKED", "SKIP"):
-                await self._db.upsert_issue_state(
-                    issue_number=issue.number,
-                    repo=repo,
-                    metadata={"proactive_skipped": True},
-                )
-                continue
-
-            # Run quality gate with proactive=True (requires high score)
-            launcher = get_agent_launcher()
-            gate_result = await launcher.run_quality_gate(repo, issue, classification, is_proactive=True)
-
-            if gate_result != "proceed":
-                # Mark as skipped so we don't re-evaluate next cycle
+            if sanity.verdict == "SKIP":
                 await self._db.merge_issue_metadata(
                     issue_number=issue.number,
                     repo=repo,
@@ -313,13 +272,9 @@ class ManagementLoop:
                 )
                 continue
 
-            # Passed the gate — pick it up
-            logger.info(f"Proactive pickup: Issue #{issue.number}")
-
-            # Add ag/proactive as an informational label (persists through transitions)
+            # Launch scout agent
             await labels.add_label(repo, issue.id, "ag/proactive")
 
-            # Comment tagging the owner
             owner_tag = f"@{issue.author}" if issue.author else "the issue author"
             await self._tracker.add_comment(
                 repo,
@@ -329,18 +284,13 @@ class ManagementLoop:
                 f"when the PR is ready.",
             )
 
-            # Mark as proactively picked
             await self._db.merge_issue_metadata(
                 issue_number=issue.number,
                 repo=repo,
                 metadata_update={"proactive_picked": True},
             )
 
-            # Launch agent based on classification
-            if classification.category == "SIMPLE":
-                await launcher.launch_simple(repo, issue)
-            elif classification.category == "COMPLEX":
-                await launcher.launch_planner(repo, issue)
+            await launcher.launch_scout(repo, issue)
 
             picked_up += 1
 

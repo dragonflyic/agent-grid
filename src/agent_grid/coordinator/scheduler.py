@@ -387,7 +387,7 @@ class Scheduler:
     # -------------------------------------------------------------------------
 
     async def _classify_and_act(self, repo: str, issue_id: str) -> None:
-        """Classify an issue, run quality gate, and launch the appropriate agent."""
+        """Sanity-check an issue, then launch a scout agent."""
         from ..config import settings
 
         can_launch, reason = await self._budget_manager.can_launch_agent()
@@ -402,69 +402,31 @@ class Scheduler:
             logger.error(f"Failed to fetch issue {issue_id}: {e}")
             return
 
-        from ..issue_tracker.metadata import embed_metadata
         from .classifier import get_classifier
-
         classifier = get_classifier()
-        classification = await classifier.classify(issue, repo)
+        sanity = await classifier.sanity_check(issue)
 
         await self._db.upsert_issue_state(
             issue_number=issue.number,
             repo=repo,
-            classification=classification.category,
+            classification=sanity.verdict,
         )
         await self._db.record_pipeline_event(
-            issue.number,
-            repo,
-            "classified",
-            "classify",
-            {
-                "category": classification.category,
-                "reason": classification.reason,
-                "estimated_complexity": classification.estimated_complexity,
-                "source": "webhook",
-            },
+            issue.number, repo, "sanity_check", "classify",
+            {"verdict": sanity.verdict, "reason": sanity.reason, "source": "webhook"},
         )
 
-        from .agent_launcher import get_agent_launcher
-
-        launcher = get_agent_launcher()
-        labels = get_label_manager()
-
-        if classification.category == "SKIP":
+        if sanity.verdict == "SKIP":
+            labels = get_label_manager()
             await labels.transition_to(repo, issue.id, "ag/skipped")
-            await tracker.add_comment(
-                repo,
-                issue.id,
-                f"Skipping automated work: {classification.reason}",
-            )
+            await tracker.add_comment(repo, issue.id, f"Skipping: {sanity.reason}")
             logger.info(f"Webhook: Issue #{issue.number}: SKIPPED")
             return
 
-        if classification.category == "BLOCKED":
-            await labels.transition_to(repo, issue.id, "ag/blocked")
-            question = classification.blocking_question or classification.reason
-            comment = embed_metadata(
-                f"**Agent needs clarification:**\n\n{question}",
-                {"type": "blocked", "reason": classification.reason},
-            )
-            await tracker.add_comment(repo, issue.id, comment)
-            logger.info(f"Webhook: Issue #{issue.number}: BLOCKED — posted question")
-            return
-
-        # Quality gate for SIMPLE and COMPLEX issues
-        if settings.quality_gate_enabled:
-            gate_result = await launcher.run_quality_gate(repo, issue, classification, is_proactive=False)
-            if gate_result != "proceed":
-                logger.info(f"Webhook: Issue #{issue.number}: quality gate {gate_result}")
-                return
-
-        if classification.category == "SIMPLE":
-            await launcher.launch_simple(repo, issue)
-        elif classification.category == "COMPLEX":
-            await launcher.launch_planner(repo, issue)
-
-        logger.info(f"Webhook: Processed issue #{issue.number} as {classification.category}")
+        from .agent_launcher import get_agent_launcher
+        launcher = get_agent_launcher()
+        await launcher.launch_scout(repo, issue)
+        logger.info(f"Webhook: Issue #{issue.number}: launched scout")
 
     # -------------------------------------------------------------------------
     # Nudge handling
