@@ -27,6 +27,10 @@ AG_LABELS = {
     "ag/epic",
 }
 
+# Labels that indicate issue TYPE (not pipeline state).
+# These are preserved during label transitions.
+MARKER_LABELS = {"ag/sub-issue", "ag/epic", "ag/proactive"}
+
 
 class LabelManager:
     """Manages label transitions on GitHub issues."""
@@ -41,6 +45,8 @@ class LabelManager:
 
         for label in current_ag_labels:
             if label != new_label:
+                if label in MARKER_LABELS:
+                    continue  # preserve type markers during transitions
                 await self._tracker.remove_label(repo, issue_id, label)
 
         if new_label not in current_ag_labels:
@@ -71,6 +77,8 @@ class LabelManager:
             "ag/blocked": "e4e669",
             "ag/waiting": "c5def5",
             "ag/planning": "d4c5f9",
+            "ag/scouting": "d4c5f9",
+            "ag/queued": "c5def5",
             "ag/review-pending": "fbca04",
             "ag/done": "0e8a16",
             "ag/failed": "d93f0b",

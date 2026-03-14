@@ -398,22 +398,22 @@ This MUST be the last thing you output:
 
 <!-- SCOUT_RESULT -->
 ```json
-{{{{
+{{
   "verdict": "implement" | "decompose" | "needs_human",
   "plan": "Detailed step-by-step implementation plan. Be specific about files, functions, and changes.",
   "estimated_files": ["list", "of", "files", "to", "change"],
   "estimated_lines": 150,
   "steps": [
-    {{{{
+    {{
       "title": "Step title (only if verdict is decompose)",
       "description": "What this step does",
       "files": ["files", "involved"],
       "depends_on": []
-    }}}}
+    }}
   ],
   "question": "Question for human (only if verdict is needs_human)",
   "reason": "Why you chose this verdict"
-}}}}
+}}
 ```
 <!-- /SCOUT_RESULT -->
 
