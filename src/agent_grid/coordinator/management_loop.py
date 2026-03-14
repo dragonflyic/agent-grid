@@ -301,7 +301,12 @@ class ManagementLoop:
         logger.info(f"Phase 9: Proactive scan complete — picked up {picked_up} issues")
 
     async def _check_in_progress(self, repo: str) -> None:
-        """Phase 4: Check in-progress executions for timeouts."""
+        """Phase 4: Check in-progress executions for timeouts.
+
+        Also reaps orphaned PENDING executions that never got an external
+        run ID (e.g., Oz submission failed during a deploy). These are
+        reaped after 5 minutes instead of the full execution timeout.
+        """
         from ..execution_grid import ExecutionStatus
 
         running = await self._db.get_running_executions()
@@ -309,6 +314,7 @@ class ManagementLoop:
         pending = await self._db.list_executions(status=ExecutionStatus.PENDING)
 
         grid = get_execution_grid()
+        orphan_timeout = 300  # 5 minutes for pending with no external run
 
         for execution in running + pending:
             ref_time = execution.started_at or execution.created_at
@@ -316,15 +322,25 @@ class ManagementLoop:
                 continue
             now = utc_now()
             elapsed = (now - ref_time).total_seconds()
-            if elapsed > settings.execution_timeout_seconds:
-                logger.warning(f"Execution {execution.id} timed out after {elapsed:.0f}s")
+
+            # Orphaned PENDING: claimed in DB but never submitted to Oz/Fly
+            # (e.g., deploy interrupted between DB claim and API call)
+            is_orphan = (
+                execution.status == ExecutionStatus.PENDING
+                and not getattr(execution, "external_run_id", None)
+                and elapsed > orphan_timeout
+            )
+
+            if is_orphan or elapsed > settings.execution_timeout_seconds:
+                reason = "orphaned (no external run)" if is_orphan else "timed out"
+                logger.warning(f"Execution {execution.id} {reason} after {elapsed:.0f}s")
                 # Cancel the actual run (Oz/Fly) so it stops burning compute
                 try:
                     await grid.cancel_execution(execution.id)
                 except Exception as e:
                     logger.warning(f"Failed to cancel backend execution {execution.id}: {e}")
                 execution.status = ExecutionStatus.FAILED
-                execution.result = "Timed out"
+                execution.result = "Orphaned (never submitted)" if is_orphan else "Timed out"
                 await self._db.update_execution(execution)
                 # Transition label so the issue exits in-progress
                 issue_id = await self._db.get_issue_id_for_execution(execution.id)
@@ -334,14 +350,15 @@ class ManagementLoop:
                         await labels.transition_to(repo, issue_id, "ag/failed")
                     except Exception as e:
                         logger.warning(f"Failed to transition issue #{issue_id} label: {e}")
+                    event_type = "execution_orphaned" if is_orphan else "execution_timeout"
                     await self._db.record_pipeline_event(
                         issue_number=int(issue_id),
                         repo=repo,
-                        event_type="execution_timeout",
+                        event_type=event_type,
                         stage="monitor",
                         detail={"execution_id": str(execution.id), "elapsed_seconds": int(elapsed)},
                     )
-                    logger.info(f"Issue #{issue_id}: timed out — transitioned to ag/failed")
+                    logger.info(f"Issue #{issue_id}: {reason} — transitioned to ag/failed")
 
     async def _reap_stale_in_progress(self, repo: str) -> None:
         """Phase 4b: Reap ag/in-progress issues with no active execution.
