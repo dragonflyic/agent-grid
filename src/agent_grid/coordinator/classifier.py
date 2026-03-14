@@ -5,6 +5,7 @@ Calls Claude to classify each issue as SIMPLE, COMPLEX, BLOCKED, or SKIP.
 
 import json
 import logging
+import re
 
 import anthropic
 
@@ -39,7 +40,7 @@ Issue Body:
 {body}
 
 Labels: {labels}
-
+{reference_statuses}
 Classify as ONE of:
 A. SIMPLE — Single PR by one agent. < 200 lines changed, single concern.
 B. COMPLEX — Needs decomposition. Multiple files/concerns, needs a plan.
@@ -49,6 +50,9 @@ C. BLOCKED — Genuinely needs human input that a developer with full codebase
    decisions, external service access, choosing between fundamentally different
    product directions. Do NOT use BLOCKED for vague descriptions — the agent
    can read the codebase and figure out what to do.
+   IMPORTANT: Do NOT classify as BLOCKED if the issue mentions dependencies on
+   other issues/PRs that are already CLOSED or MERGED. A resolved dependency
+   is not a blocker.
 D. SKIP — Not suitable for AI (too risky, needs domain expertise beyond code,
    or completely nonsensical with no actionable work).
 
@@ -70,12 +74,24 @@ class Classifier:
     def __init__(self):
         self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-    async def classify(self, issue: IssueInfo) -> Classification:
-        """Classify a single issue."""
+    async def classify(self, issue: IssueInfo, repo: str | None = None) -> Classification:
+        """Classify a single issue.
+
+        Args:
+            issue: The issue to classify.
+            repo: Repository in owner/name format. When provided, referenced
+                  issues/PRs in the body are resolved to their current status
+                  so the LLM can make informed dependency decisions.
+        """
+        reference_statuses = ""
+        if repo:
+            reference_statuses = await self._resolve_references(issue, repo)
+
         prompt = CLASSIFICATION_PROMPT.format(
             title=issue.title,
             body=issue.body or "(no description)",
             labels=", ".join(issue.labels) if issue.labels else "(none)",
+            reference_statuses=reference_statuses,
         )
 
         try:
@@ -111,6 +127,48 @@ class Classifier:
         except Exception as e:
             logger.error(f"Classification API error for issue #{issue.number}: {e}")
             return Classification(category="SKIP", reason=f"Classification error: {e}")
+
+    async def _resolve_references(self, issue: IssueInfo, repo: str) -> str:
+        """Resolve #N references in the issue body to their current status.
+
+        Fetches each referenced issue/PR from GitHub and returns a formatted
+        block for the classification prompt, e.g.:
+
+            Referenced issues/PRs (current status):
+            - #2100 (Introduce a browser hosting abstraction): MERGED
+            - #1500 (Add caching layer): OPEN
+        """
+        if not issue.body:
+            return ""
+
+        refs = set(re.findall(r"#(\d+)", issue.body))
+        refs.discard(str(issue.number))  # skip self-references
+
+        if not refs:
+            return ""
+
+        # Cap at 10 to avoid excessive API calls
+        sorted_refs = sorted(refs, key=int)[:10]
+
+        from ..issue_tracker import get_issue_tracker
+
+        tracker = get_issue_tracker()
+        statuses: list[str] = []
+
+        for ref_num in sorted_refs:
+            ref_status = await tracker.get_reference_status(repo, ref_num)
+            title = ref_status["title"]
+            status = ref_status["status"]
+            if title:
+                title_short = title[:80]
+                statuses.append(f"- #{ref_num} ({title_short}): {status}")
+            else:
+                statuses.append(f"- #{ref_num}: {status}")
+
+        if not statuses:
+            return ""
+
+        return "\nReferenced issues/PRs (current status):\n" + "\n".join(statuses) + "\n"
 
 
 _classifier: Classifier | None = None

@@ -352,4 +352,42 @@ What the previous agent run did:
 """
         return prompt
 
+    elif mode == "rebase":
+        pr_number = context.get("pr_number")
+        existing_branch = context.get("existing_branch", branch_name)
+
+        prompt = (
+            base
+            + f"""
+## IMPORTANT: PR #{pr_number} has merge conflicts
+
+Previous work is on branch: {existing_branch}
+Checkout that branch and rebase onto the default branch:
+```bash
+git checkout {existing_branch}
+git fetch origin
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+git rebase "origin/$DEFAULT_BRANCH"
+```
+
+If there are merge conflicts during the rebase:
+1. Read both versions of each conflicted file to understand the intent
+2. Resolve the conflict by keeping the correct combination of both changes
+3. `git add` the resolved files
+4. `git rebase --continue`
+5. Repeat until the rebase is complete
+
+After the rebase is complete, force push:
+```bash
+git push --force-with-lease origin {existing_branch}
+```
+
+Do NOT create a new PR. The existing PR #{pr_number} will be updated automatically.
+Do NOT make any other changes besides resolving the conflicts.
+
+**EXIT immediately after pushing.** Your job is done. CI will re-run automatically.
+"""
+        )
+        return prompt
+
     return base
