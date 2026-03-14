@@ -15,6 +15,14 @@ from ..issue_tracker.public_api import IssueInfo
 logger = logging.getLogger("agent_grid.classifier")
 
 
+class SanityResult:
+    """Result of the sanity check."""
+
+    def __init__(self, verdict: str, reason: str):
+        self.verdict = verdict  # "PROCEED" or "SKIP"
+        self.reason = reason
+
+
 class Classification:
     """Result of classifying an issue."""
 
@@ -68,11 +76,69 @@ Respond as JSON:
 Respond ONLY with the JSON object, no markdown fences."""
 
 
+SANITY_CHECK_PROMPT = """You are triaging a GitHub issue for an automated coding agent.
+
+Issue Title: {title}
+Issue Body:
+{body}
+
+Labels: {labels}
+
+Decide: should this issue be sent to a coding agent for exploration and implementation?
+
+Answer SKIP if the issue is:
+- Completely nonsensical or spam
+- A discussion/question with no actionable work
+- Requesting access, credentials, or admin actions that code can't solve
+- A duplicate of another issue
+
+Answer PROCEED for everything else — even if the issue is vague, complex, or
+might turn out to be infeasible. The coding agent will explore the codebase
+and figure out the right approach.
+
+Respond as JSON:
+{{
+  "verdict": "PROCEED" | "SKIP",
+  "reason": "one sentence explaining why"
+}}
+
+Respond ONLY with the JSON object, no markdown fences."""
+
+
 class Classifier:
     """Classifies GitHub issues using Claude API."""
 
     def __init__(self):
         self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+    async def sanity_check(self, issue: IssueInfo) -> SanityResult:
+        """Quick LLM check: is this issue actionable or nonsense?"""
+        prompt = SANITY_CHECK_PROMPT.format(
+            title=issue.title,
+            body=issue.body or "(no description)",
+            labels=", ".join(issue.labels) if issue.labels else "(none)",
+        )
+        try:
+            response = await self._client.messages.create(
+                model=settings.classification_model,
+                max_tokens=200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                lines = text.split("\n")
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                text = "\n".join(lines).strip()
+            data = json.loads(text)
+            result = SanityResult(
+                verdict=data.get("verdict", "PROCEED"),
+                reason=data.get("reason", ""),
+            )
+            logger.info(f"Issue #{issue.number}: sanity check {result.verdict} — {result.reason}")
+            return result
+        except Exception as e:
+            logger.error(f"Sanity check failed for issue #{issue.number}: {e}")
+            return SanityResult(verdict="PROCEED", reason="Sanity check error, defaulting to PROCEED")
 
     async def classify(self, issue: IssueInfo, repo: str | None = None) -> Classification:
         """Classify a single issue.
