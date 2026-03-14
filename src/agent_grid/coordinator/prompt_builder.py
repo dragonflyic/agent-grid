@@ -213,8 +213,20 @@ gh issue edit {issue.number} --repo {repo} --remove-label "ag/planning"
 """
 
     elif mode == "implement":
+        scout_plan = ""
+        if context and context.get("scout_plan"):
+            scout_plan = f"""
+## Implementation Plan (from scout)
+
+A scout agent has already explored the codebase and produced this plan for you.
+Follow this plan — it reflects the actual codebase state:
+
+{context['scout_plan']}
+"""
+
         return (
             base
+            + scout_plan
             + f"""
 ## Setup
 Create and checkout a working branch:
