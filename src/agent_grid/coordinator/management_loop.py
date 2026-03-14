@@ -105,14 +105,18 @@ class ManagementLoop:
                 classification=sanity.verdict,
             )
             await self._db.record_pipeline_event(
-                issue.number, repo, "sanity_check", "classify",
+                issue.number,
+                repo,
+                "sanity_check",
+                "classify",
                 {"verdict": sanity.verdict, "reason": sanity.reason},
             )
 
             if sanity.verdict == "SKIP":
                 await labels.transition_to(repo, issue.id, "ag/skipped")
                 await self._tracker.add_comment(
-                    repo, issue.id,
+                    repo,
+                    issue.id,
                     f"Skipping: {sanity.reason}",
                 )
                 logger.info(f"Issue #{issue.number}: SKIPPED — {sanity.reason}")

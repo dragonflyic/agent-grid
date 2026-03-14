@@ -388,7 +388,6 @@ class Scheduler:
 
     async def _classify_and_act(self, repo: str, issue_id: str) -> None:
         """Sanity-check an issue, then launch a scout agent."""
-        from ..config import settings
 
         can_launch, reason = await self._budget_manager.can_launch_agent()
         if not can_launch:
@@ -403,6 +402,7 @@ class Scheduler:
             return
 
         from .classifier import get_classifier
+
         classifier = get_classifier()
         sanity = await classifier.sanity_check(issue)
 
@@ -412,7 +412,10 @@ class Scheduler:
             classification=sanity.verdict,
         )
         await self._db.record_pipeline_event(
-            issue.number, repo, "sanity_check", "classify",
+            issue.number,
+            repo,
+            "sanity_check",
+            "classify",
             {"verdict": sanity.verdict, "reason": sanity.reason, "source": "webhook"},
         )
 
@@ -424,6 +427,7 @@ class Scheduler:
             return
 
         from .agent_launcher import get_agent_launcher
+
         launcher = get_agent_launcher()
         await launcher.launch_scout(repo, issue)
         logger.info(f"Webhook: Issue #{issue.number}: launched scout")
@@ -524,18 +528,25 @@ class Scheduler:
                         elif execution.mode == "scout":
                             # Scout done — parse result and act on verdict
                             from .agent_launcher import get_agent_launcher
+
                             launcher = get_agent_launcher()
                             scout_result = launcher.parse_scout_result(execution.result or "")
                             if scout_result:
-                                await launcher.handle_scout_completed(
-                                    repo, issue_id, execution.id, scout_result
-                                )
+                                await launcher.handle_scout_completed(repo, issue_id, execution.id, scout_result)
                             else:
                                 # Scout didn't produce parseable output — fall back to implement
-                                logger.warning(f"Issue #{issue_id}: scout result not parseable, falling back to implement")
+                                logger.warning(
+                                    f"Issue #{issue_id}: scout result not parseable, falling back to implement"
+                                )
                                 await launcher.handle_scout_completed(
-                                    repo, issue_id, execution.id,
-                                    {"verdict": "implement", "plan": execution.result or "", "reason": "scout output fallback"},
+                                    repo,
+                                    issue_id,
+                                    execution.id,
+                                    {
+                                        "verdict": "implement",
+                                        "plan": execution.result or "",
+                                        "reason": "scout output fallback",
+                                    },
                                 )
                         elif execution.mode == "rebase":
                             # Rebase done — just mark for review like implementation
@@ -651,6 +662,7 @@ class Scheduler:
         metadata = parent_state.get("metadata") or {}
         if isinstance(metadata, str):
             import json
+
             metadata = json.loads(metadata)
 
         sub_order = metadata.get("sub_issue_order", [])
@@ -667,9 +679,7 @@ class Scheduler:
                 sub = await tracker.get_issue(repo, str(sub_num))
                 if "ag/queued" in sub.labels:
                     await labels_mgr.transition_to(repo, str(sub_num), "ag/todo")
-                    logger.info(
-                        f"Sub-issue #{sub_num}: activated (next in queue after #{issue_id} merged)"
-                    )
+                    logger.info(f"Sub-issue #{sub_num}: activated (next in queue after #{issue_id} merged)")
                     activated = True
                     break  # Only activate one
             except Exception as e:
@@ -703,9 +713,9 @@ class Scheduler:
                 else:
                     icon = "\u23f3"  # hourglass
                     status = "queued"
-                lines.append(f"{i+1}. {icon} #{sub_num} {title} — {status}")
+                lines.append(f"{i + 1}. {icon} #{sub_num} {title} — {status}")
             except Exception:
-                lines.append(f"{i+1}. \u2753 #{sub_num} — unable to fetch")
+                lines.append(f"{i + 1}. \u2753 #{sub_num} — unable to fetch")
 
         lines.append("\nSteps execute sequentially. Merge each PR to trigger the next step.")
 
