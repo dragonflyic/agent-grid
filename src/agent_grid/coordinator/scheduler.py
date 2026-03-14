@@ -530,7 +530,11 @@ class Scheduler:
                             from .agent_launcher import get_agent_launcher
 
                             launcher = get_agent_launcher()
+                            # Try parsing from execution result first (Fly backend)
                             scout_result = launcher.parse_scout_result(execution.result or "")
+                            # If not found, try reading from issue comments (Oz backend posts comment)
+                            if not scout_result:
+                                scout_result = await launcher._read_scout_result_from_comments(repo, issue_id)
                             if scout_result:
                                 await launcher.handle_scout_completed(repo, issue_id, execution.id, scout_result)
                             else:

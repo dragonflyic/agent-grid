@@ -441,6 +441,22 @@ class AgentLauncher:
             logger.error(f"Failed to parse scout result: {e}")
             return None
 
+    async def _read_scout_result_from_comments(self, repo: str, issue_id: str) -> dict | None:
+        """Read the scout's structured result from a GitHub issue comment.
+
+        The scout posts its result as a comment with SCOUT_RESULT markers.
+        We find the latest such comment and parse the JSON.
+        """
+        try:
+            issue = await self._tracker.get_issue(repo, issue_id)
+            for comment in reversed(issue.comments):
+                result = self.parse_scout_result(comment.body)
+                if result:
+                    return result
+        except Exception as e:
+            logger.warning(f"Failed to read scout result from comments for #{issue_id}: {e}")
+        return None
+
     async def handle_scout_completed(self, repo: str, issue_id: str, execution_id, scout_result: dict) -> None:
         """Act on a scout agent's verdict."""
         verdict = scout_result.get("verdict", "implement")

@@ -393,29 +393,37 @@ Explore the codebase thoroughly and produce an implementation plan. Do NOT write
 
 ### Step 3: Produce Your Verdict
 
-After exploration, output your verdict as a JSON block between markers.
-This MUST be the last thing you output:
+After exploration, format your verdict as a JSON block between markers.
 
-<!-- SCOUT_RESULT -->
+First, post it as a comment on the issue so the coordinator can read it:
+```bash
+gh issue comment {issue.number} --repo {repo} --body "<!-- SCOUT_RESULT -->
+{"`" * 3}json
+<your JSON verdict here>
+{"`" * 3}
+<!-- /SCOUT_RESULT -->"
+```
+
+The JSON must have this structure:
 ```json
 {{
   "verdict": "implement" | "decompose" | "needs_human",
-  "plan": "Detailed step-by-step implementation plan. Be specific about files, functions, and changes.",
-  "estimated_files": ["list", "of", "files", "to", "change"],
+  "plan": "Detailed step-by-step implementation plan.",
+  "estimated_files": ["list", "of", "files"],
   "estimated_lines": 150,
   "steps": [
     {{
-      "title": "Step title (only if verdict is decompose)",
+      "title": "Step title (only if decompose)",
       "description": "What this step does",
-      "files": ["files", "involved"],
-      "depends_on": []
+      "files": ["files", "involved"]
     }}
   ],
-  "question": "Question for human (only if verdict is needs_human)",
+  "question": "Question for human (only if needs_human)",
   "reason": "Why you chose this verdict"
 }}
 ```
-<!-- /SCOUT_RESULT -->
+
+Then EXIT immediately.
 
 ### Verdict Guidelines
 - **implement**: This can be done in one PR. Provide a detailed plan.
@@ -431,7 +439,7 @@ This MUST be the last thing you output:
 - Do NOT create issues
 - Do NOT modify any files
 - ONLY explore and produce your verdict
-- Your verdict JSON MUST be the last thing you output
+- You MUST post your verdict as an issue comment using the gh command above
 """
 
     elif mode == "rebase":
