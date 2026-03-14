@@ -1,7 +1,7 @@
-"""End-to-end test for COMPLEX issue flow: classify -> plan -> decompose.
+"""End-to-end test for issue flow: sanity check -> plan -> decompose.
 
-Picks a complex issue (or user-specified one), runs it through:
-1. Classifier — confirms it's COMPLEX
+Picks an issue (or user-specified one), runs it through:
+1. Classifier — sanity checks it's actionable
 2. Planner — generates implementation plan via Claude
 3. Sub-issue creation — creates sub-issues (dry-run: logged to file)
 4. Prompt generation — shows what each sub-issue's agent prompt would look like
@@ -83,28 +83,25 @@ async def main():
             await tracker.close()
             return
 
-        print(f"Found {len(candidates)} candidates. Classifying to find COMPLEX ones...\n")
+        print(f"Found {len(candidates)} candidates. Sanity checking...\n")
 
-        print("Phase 2: Classifying all issues...")
+        print("Phase 2: Sanity checking all issues...")
         classifier = get_classifier()
-        classified = []
+        actionable = []
         for iss in candidates:
-            c = await classifier.classify(iss)
-            classified.append((iss, c))
-            sym = {"SIMPLE": "+", "COMPLEX": "*", "BLOCKED": "!", "SKIP": "-"}.get(c.category, "?")
-            print(f"  [{sym}] #{iss.number}: {c.category} (complexity={c.estimated_complexity}) -- {c.reason}")
+            s = await classifier.sanity_check(iss)
+            sym = {"PROCEED": "+", "SKIP": "-"}.get(s.verdict, "?")
+            print(f"  [{sym}] #{iss.number}: {s.verdict} -- {s.reason}")
+            if s.verdict == "PROCEED":
+                actionable.append(iss)
 
-        # Pick the most complex COMPLEX issue
-        complex_issues = [(iss, c) for iss, c in classified if c.category == "COMPLEX"]
-        if not complex_issues:
-            print("\nNo COMPLEX issues found. Picking highest complexity issue.")
-            classified.sort(key=lambda x: x[1].estimated_complexity, reverse=True)
-            issue, cl = classified[0]
-        else:
-            complex_issues.sort(key=lambda x: x[1].estimated_complexity, reverse=True)
-            issue, cl = complex_issues[0]
+        if not actionable:
+            print("\nNo actionable issues found (all SKIP).")
+            await tracker.close()
+            return
 
-        print(f"\n  Selected most complex: #{issue.number} (complexity={cl.estimated_complexity})")
+        issue = actionable[0]
+        print(f"\n  Selected: #{issue.number}")
 
     # -- Show issue details ------------------------------------------------
     print(f"\n{'~' * 60}")
@@ -114,19 +111,15 @@ async def main():
         preview = issue.body[:600] + ("..." if len(issue.body) > 600 else "")
         print(f"\n{preview}\n")
 
-    # -- Phase 3: Classify (if user-specified, we classify it too) ---------
+    # -- Phase 3: Sanity check (if user-specified, we check it too) -------
     if specific_issue:
-        print("Phase 2: Classifying issue...")
+        print("Phase 2: Sanity checking issue...")
         classifier = get_classifier()
-        classification = await classifier.classify(issue)
-        print(f"  Category: {classification.category}")
-        print(f"  Complexity: {classification.estimated_complexity}")
-        print(f"  Reason: {classification.reason}")
-        if classification.category != "COMPLEX":
-            print(
-                f"\n  Note: Issue classified as {classification.category}, "
-                f"not COMPLEX. Running planner anyway for testing.\n"
-            )
+        sanity = await classifier.sanity_check(issue)
+        print(f"  Verdict: {sanity.verdict}")
+        print(f"  Reason: {sanity.reason}")
+        if sanity.verdict == "SKIP":
+            print("\n  Note: Issue sanity check returned SKIP. Running planner anyway for testing.\n")
 
     # -- Phase 4: Run planner to decompose --------------------------------
     print(f"\n{'~' * 60}")

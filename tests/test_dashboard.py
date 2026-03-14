@@ -287,13 +287,12 @@ class TestDashboardActions:
         mock_tracker = AsyncMock()
         mock_tracker.get_issue.return_value = _make_issue(1)
 
-        mock_classification = MagicMock()
-        mock_classification.category = "SIMPLE"
-        mock_classification.reason = "Small change"
-        mock_classification.estimated_complexity = 2
+        mock_sanity = MagicMock()
+        mock_sanity.verdict = "ACTIONABLE"
+        mock_sanity.reason = "Small change"
 
         mock_classifier = AsyncMock()
-        mock_classifier.classify.return_value = mock_classification
+        mock_classifier.sanity_check.return_value = mock_sanity
 
         req = ClassifyRequest(issue_numbers=[1])
 
@@ -305,11 +304,11 @@ class TestDashboardActions:
         ):
             result = await classify_issues(req)
 
-        assert result["results"][0]["classification"] == "SIMPLE"
+        assert result["results"][0]["verdict"] == "ACTIONABLE"
         assert result["results"][0]["reason"] == "Small change"
 
         state = await db.get_issue_state(1, "org/repo")
-        assert state["classification"] == "SIMPLE"
+        assert state["classification"] == "ACTIONABLE"
 
         events = await db.get_pipeline_events("org/repo")
         assert len(events) == 1

@@ -4,6 +4,7 @@ Extracted from ManagementLoop to avoid Scheduler depending on ManagementLoop's
 private methods.
 """
 
+import json
 import logging
 import re
 from uuid import uuid4
@@ -12,7 +13,7 @@ from ..config import settings
 from ..execution_grid import AgentExecution, ExecutionConfig, ExecutionStatus, get_execution_grid, utc_now
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
-from ..issue_tracker.metadata import embed_metadata, extract_metadata
+from ..issue_tracker.metadata import extract_metadata
 from .database import get_database
 from .prompt_builder import build_prompt
 
@@ -102,6 +103,7 @@ class AgentLauncher:
         stage_map = {
             "implement": "launched",
             "plan": "planning",
+            "scout": "scouting",
             "fix_ci": "ci_fix",
             "address_review": "addressing_review",
             "retry_with_feedback": "retrying",
@@ -390,6 +392,198 @@ class AgentLauncher:
             logger.info(f"PR #{pr_info['pr_number']}: launched rebase agent for merge conflicts")
         return launched
 
+    async def launch_scout(self, repo: str, issue) -> bool:
+        """Launch a scout agent to explore the codebase and plan the approach."""
+        if await self.has_active_execution(issue.id):
+            return False
+
+        labels = get_label_manager()
+        await labels.transition_to(repo, issue.id, "ag/scouting")
+
+        prompt = build_prompt(issue, repo, mode="scout")
+        repo_url = f"https://github.com/{repo}.git"
+
+        launched = await self.claim_and_launch(
+            issue_id=issue.id,
+            repo_url=repo_url,
+            prompt=prompt,
+            mode="scout",
+            issue_number=issue.number,
+        )
+        if launched:
+            logger.info(f"Issue #{issue.number}: launched scout agent")
+        else:
+            await labels.transition_to(repo, issue.id, "ag/todo")
+        return launched
+
+    def parse_scout_result(self, result_text: str) -> dict | None:
+        """Parse structured scout output from execution result."""
+        if not result_text:
+            return None
+        marker = "<!-- SCOUT_RESULT -->"
+        end_marker = "<!-- /SCOUT_RESULT -->"
+        start = result_text.find(marker)
+        if start == -1:
+            return None
+        start += len(marker)
+        end = result_text.find(end_marker, start)
+        if end == -1:
+            end = len(result_text)
+        json_text = result_text[start:end].strip()
+        # Strip markdown code fences if present
+        if json_text.startswith("```"):
+            lines = json_text.split("\n")
+            lines = [line for line in lines if not line.strip().startswith("```")]
+            json_text = "\n".join(lines).strip()
+        try:
+            return json.loads(json_text)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse scout result: {e}")
+            return None
+
+    async def handle_scout_completed(self, repo: str, issue_id: str, execution_id, scout_result: dict) -> None:
+        """Act on a scout agent's verdict."""
+        verdict = scout_result.get("verdict", "implement")
+        plan = scout_result.get("plan", "")
+        issue = await self._tracker.get_issue(repo, issue_id)
+
+        if verdict == "needs_human":
+            labels = get_label_manager()
+            await labels.transition_to(repo, issue_id, "ag/blocked")
+            question = scout_result.get("question", scout_result.get("reason", ""))
+            from ..issue_tracker.metadata import embed_metadata
+
+            comment = embed_metadata(
+                f"**Agent needs clarification:**\n\n{question}",
+                {"type": "blocked", "reason": f"scout: {scout_result.get('reason', '')}"},
+            )
+            await self._tracker.add_comment(repo, issue_id, comment)
+            await self._post_status(
+                repo, issue_id, "failed", f"Scout needs human input: {scout_result.get('reason', '')}"
+            )
+            logger.info(f"Issue #{issue.number}: scout verdict=needs_human")
+            return
+
+        if verdict == "decompose":
+            created = await self._create_sequential_sub_issues(repo, issue, scout_result)
+            if created:
+                return
+            # Fall back to implement if decompose failed
+            logger.warning(f"Issue #{issue.number}: decompose failed, falling back to implement")
+            verdict = "implement"
+
+        # Default: implement
+        context = {"scout_plan": plan}
+        reviewer = await self.resolve_reviewer(repo, issue)
+        if reviewer:
+            context["reviewer"] = reviewer
+
+        labels = get_label_manager()
+        await labels.transition_to(repo, issue_id, "ag/in-progress")
+
+        prompt = build_prompt(issue, repo, mode="implement", context=context)
+        repo_url = f"https://github.com/{repo}.git"
+        launched = await self.claim_and_launch(
+            issue_id=issue_id,
+            repo_url=repo_url,
+            prompt=prompt,
+            mode="implement",
+            issue_number=issue.number,
+            context=context,
+        )
+        if launched:
+            logger.info(f"Issue #{issue.number}: scout verdict=implement — launched agent")
+        else:
+            await labels.transition_to(repo, issue_id, "ag/todo")
+
+    async def _create_sequential_sub_issues(self, repo: str, parent_issue, scout_result: dict) -> bool:
+        """Create sub-issues from scout decomposition, first gets ag/todo, rest get ag/queued.
+
+        Returns True if sub-issues were created successfully, False otherwise.
+        """
+        steps = scout_result.get("steps", [])
+        if not steps:
+            logger.warning(f"Issue #{parent_issue.number}: scout decompose but no steps")
+            return False
+
+        sub_issue_order = []
+        for i, step in enumerate(steps):
+            title = f"[Sub #{parent_issue.number}] {step.get('title', f'Step {i + 1}')}"
+            body_parts = [
+                f"Part of #{parent_issue.number}\n",
+                f"## Objective\n{step.get('description', '')}\n",
+            ]
+            if step.get("files"):
+                body_parts.append("## Files\n" + "\n".join(f"- `{f}`" for f in step["files"]) + "\n")
+
+            label_list = ["ag/sub-issue"]
+            if i == 0:
+                label_list.append("ag/todo")
+            else:
+                label_list.append("ag/queued")
+
+            body = "\n".join(body_parts)
+
+            try:
+                sub = await self._tracker.create_subissue(
+                    repo,
+                    parent_id=parent_issue.id,
+                    title=title,
+                    body=body,
+                    labels=label_list,
+                )
+                sub_issue_order.append(sub.number)
+                if parent_issue.author:
+                    await self._tracker.assign_issue(repo, str(sub.number), parent_issue.author)
+                logger.info(f"Created sub-issue #{sub.number}: {title} ({'ag/todo' if i == 0 else 'ag/queued'})")
+            except Exception as e:
+                logger.error(f"Failed to create sub-issue for #{parent_issue.number}: {e}")
+
+        labels_mgr = get_label_manager()
+
+        if not sub_issue_order:
+            # All sub-issue creations failed
+            await labels_mgr.transition_to(repo, parent_issue.id, "ag/failed")
+            await self._tracker.add_comment(
+                repo,
+                parent_issue.id,
+                "Failed to create any sub-issues during decomposition. Needs human intervention.",
+            )
+            return False
+
+        await labels_mgr.transition_to(repo, parent_issue.id, "ag/epic")
+
+        # Store order in parent metadata
+        await self._db.merge_issue_metadata(
+            issue_number=parent_issue.number,
+            repo=repo,
+            metadata_update={"sub_issue_order": sub_issue_order},
+        )
+
+        # Post progress comment
+        await self._post_progress_comment(repo, parent_issue, sub_issue_order, steps)
+        logger.info(f"Issue #{parent_issue.number}: decomposed into {len(sub_issue_order)} sequential sub-issues")
+        return True
+
+    async def _post_progress_comment(
+        self, repo: str, parent_issue, sub_issue_order: list[int], steps: list[dict]
+    ) -> None:
+        """Post a progress tracking comment on the parent issue."""
+        lines = [f"## Implementation Plan ({len(sub_issue_order)} steps)\n"]
+        for i, (num, step) in enumerate(zip(sub_issue_order, steps)):
+            title = step.get("title", f"Step {i + 1}")
+            if i == 0:
+                icon = "\U0001f7e1"  # yellow circle — next up
+                status = "next up"
+            else:
+                icon = "\u23f3"  # hourglass — queued
+                status = "queued"
+            lines.append(f"{i + 1}. {icon} #{num} {title} — {status}")
+
+        lines.append("\nSteps execute sequentially. Merge each PR to trigger the next step.")
+
+        await self._post_status(repo, parent_issue.id, "in_progress", "\n".join(lines))
+
     async def enrich_check_output(self, repo: str, check_info: dict) -> dict:
         """If check_output is empty, fetch actual CI logs via job ID."""
         if check_info.get("check_output") or not check_info.get("job_id"):
@@ -401,97 +595,6 @@ class AgentLauncher:
         except Exception as e:
             logger.warning(f"Failed to fetch CI logs for job {check_info.get('job_id')}: {e}")
         return check_info
-
-    async def run_quality_gate(
-        self,
-        repo: str,
-        issue,
-        classification,
-        is_proactive: bool,
-    ) -> str:
-        """Run the quality gate on an issue.
-
-        Returns "proceed", "blocked", or "skipped".
-        """
-        from .quality_gate import get_quality_gate
-
-        quality_gate = get_quality_gate()
-        labels = get_label_manager()
-
-        assessment = await quality_gate.evaluate(
-            issue=issue,
-            classification=classification,
-            is_proactive=is_proactive,
-        )
-
-        # Store assessment in issue_state metadata (atomic merge)
-        await self._db.merge_issue_metadata(
-            issue_number=issue.number,
-            repo=repo,
-            metadata_update={
-                "confidence_score": assessment.score,
-                "confidence_verdict": assessment.verdict,
-                "risk_flags": assessment.risk_flags,
-                "green_flags": assessment.green_flags,
-            },
-        )
-
-        if quality_gate.should_clarify(assessment, is_proactive):
-            await labels.transition_to(repo, issue.id, "ag/blocked")
-            question = assessment.clarification_question or assessment.explanation
-            owner_tag = f"@{issue.author} " if issue.author else ""
-            comment = embed_metadata(
-                f"**Agent confidence check — needs clarification:**\n\n"
-                f"{owner_tag}{question}\n\n"
-                f"_Confidence: {assessment.score}/10. "
-                f"Risk flags: {', '.join(assessment.risk_flags)}_",
-                {"type": "blocked", "reason": f"quality_gate: {assessment.explanation}"},
-            )
-            await self._tracker.add_comment(repo, issue.id, comment)
-            logger.info(
-                f"Issue #{issue.number}: quality gate blocked "
-                f"(score={assessment.score}/10, flags={assessment.risk_flags})"
-            )
-            await self._db.record_pipeline_event(
-                issue.number,
-                repo,
-                "quality_gate",
-                "quality_gate",
-                {"score": assessment.score, "verdict": "blocked", "risk_flags": assessment.risk_flags},
-            )
-            return "blocked"
-
-        if not quality_gate.should_proceed(assessment, is_proactive):
-            if not is_proactive:
-                await labels.transition_to(repo, issue.id, "ag/skipped")
-                await self._tracker.add_comment(
-                    repo,
-                    issue.id,
-                    f"Skipping: confidence too low ({assessment.score}/10). {assessment.explanation}",
-                )
-            logger.info(f"Issue #{issue.number}: quality gate skipped (score={assessment.score}/10)")
-            await self._db.record_pipeline_event(
-                issue.number,
-                repo,
-                "quality_gate",
-                "quality_gate",
-                {"score": assessment.score, "verdict": "skipped", "is_proactive": is_proactive},
-            )
-            return "skipped"
-
-        await self._db.record_pipeline_event(
-            issue.number,
-            repo,
-            "quality_gate",
-            "quality_gate",
-            {
-                "score": assessment.score,
-                "verdict": "proceed",
-                "risk_flags": assessment.risk_flags,
-                "green_flags": assessment.green_flags,
-            },
-        )
-        return "proceed"
 
 
 _agent_launcher: AgentLauncher | None = None
