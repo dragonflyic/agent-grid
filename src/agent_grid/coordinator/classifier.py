@@ -168,11 +168,7 @@ class Classifier:
         if not statuses:
             return ""
 
-        return (
-            "\nReferenced issues/PRs (current status):\n"
-            + "\n".join(statuses)
-            + "\n"
-        )
+        return "\nReferenced issues/PRs (current status):\n" + "\n".join(statuses) + "\n"
 
 
 _classifier: Classifier | None = None

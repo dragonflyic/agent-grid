@@ -555,11 +555,14 @@ class ManagementLoop:
             if head_sha and metadata.get("last_rebase_sha") == head_sha:
                 continue
 
-            launched = await launcher.launch_rebase(repo, {
-                "pr_number": pr_number,
-                "issue_id": issue_id,
-                "branch": head_branch,
-            })
+            launched = await launcher.launch_rebase(
+                repo,
+                {
+                    "pr_number": pr_number,
+                    "issue_id": issue_id,
+                    "branch": head_branch,
+                },
+            )
             if launched:
                 await self._db.merge_issue_metadata(
                     issue_number=int(issue_id),
