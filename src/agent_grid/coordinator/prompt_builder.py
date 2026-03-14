@@ -3,6 +3,7 @@
 Modes:
 - implement: Fresh implementation of an issue
 - plan: Explore repo and decompose a complex issue into sub-issues
+- scout: Explore repo and produce implementation plan/verdict without writing code
 - address_review: Address PR review comments on existing branch
 - retry_with_feedback: Retry after closed PR with human feedback
 """
@@ -351,6 +352,75 @@ What the previous agent run did:
 - {checkpoint.get("context_summary", "N/A")}
 """
         return prompt
+
+    elif mode == "scout":
+        return f"""You are a senior tech lead scouting a GitHub issue before any implementation begins.
+
+## Repository
+- Repo: {repo}
+
+## Issue #{issue.number}: {issue.title}
+
+{issue.body or "(no description)"}
+
+## Your Task
+
+Explore the codebase thoroughly and produce an implementation plan. Do NOT write any code or create branches.
+
+### Step 1: Deep Exploration
+- Read the README, CLAUDE.md, and key config files
+- Find ALL files relevant to this issue
+- Read the actual source code — don't just list file names
+- Understand existing tests and testing patterns
+- Check recent git history for related changes
+
+### Step 2: Feasibility Assessment
+- Can this be done in a single PR (< 300 lines changed)?
+- Are there any genuine blockers (missing credentials, unclear requirements)?
+- What's the right architectural approach?
+
+### Step 3: Produce Your Verdict
+
+After exploration, output your verdict as a JSON block between markers.
+This MUST be the last thing you output:
+
+<!-- SCOUT_RESULT -->
+```json
+{{{{
+  "verdict": "implement" | "decompose" | "needs_human",
+  "plan": "Detailed step-by-step implementation plan. Be specific about files, functions, and changes.",
+  "estimated_files": ["list", "of", "files", "to", "change"],
+  "estimated_lines": 150,
+  "steps": [
+    {{{{
+      "title": "Step title (only if verdict is decompose)",
+      "description": "What this step does",
+      "files": ["files", "involved"],
+      "depends_on": []
+    }}}}
+  ],
+  "question": "Question for human (only if verdict is needs_human)",
+  "reason": "Why you chose this verdict"
+}}}}
+```
+<!-- /SCOUT_RESULT -->
+
+### Verdict Guidelines
+- **implement**: This can be done in one PR. Provide a detailed plan.
+- **decompose**: This needs multiple sequential PRs. Provide ordered steps.
+  Each step should be independently mergeable. Later steps may build on earlier ones.
+  Keep it to 5 steps max.
+- **needs_human**: You genuinely cannot proceed without human input.
+  Only use this for things a developer with full codebase access truly cannot determine:
+  credentials, business policy decisions, choosing between fundamentally different product directions.
+
+## Rules
+- Do NOT create branches, commits, or PRs
+- Do NOT create issues
+- Do NOT modify any files
+- ONLY explore and produce your verdict
+- Your verdict JSON MUST be the last thing you output
+"""
 
     elif mode == "rebase":
         pr_number = context.get("pr_number")
