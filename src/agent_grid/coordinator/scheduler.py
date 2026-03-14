@@ -296,6 +296,9 @@ class Scheduler:
             await tracker.update_issue_status(repo, issue_id, IssueStatus.CLOSED)
             await self._update_status(repo, issue_id, "pr_merged", f"PR #{pr_number} has been merged.")
             logger.info(f"PR #{pr_number} merged — issue #{issue_id} marked ag/done")
+
+            # Check if this is a sub-issue — advance the queue
+            await self._advance_sub_issue_queue(repo, issue_id)
             return
 
         # Not merged — launch retry agent
@@ -556,6 +559,31 @@ class Scheduler:
                             # Planning done — transition to epic, sub-issues auto-launch
                             await labels_mgr.transition_to(repo, issue_id, "ag/epic")
                             logger.info(f"Plan completed for issue #{issue_id} — transitioned to ag/epic")
+                        elif execution.mode == "scout":
+                            # Scout done — parse result and act on verdict
+                            from .agent_launcher import get_agent_launcher
+                            launcher = get_agent_launcher()
+                            scout_result = launcher.parse_scout_result(execution.result or "")
+                            if scout_result:
+                                await launcher.handle_scout_completed(
+                                    repo, issue_id, execution.id, scout_result
+                                )
+                            else:
+                                # Scout didn't produce parseable output — fall back to implement
+                                logger.warning(f"Issue #{issue_id}: scout result not parseable, falling back to implement")
+                                await launcher.handle_scout_completed(
+                                    repo, issue_id, execution.id,
+                                    {"verdict": "implement", "plan": execution.result or "", "reason": "scout output fallback"},
+                                )
+                        elif execution.mode == "rebase":
+                            # Rebase done — just mark for review like implementation
+                            await labels_mgr.transition_to(repo, issue_id, "ag/review-pending")
+                            if pr_number:
+                                tracker = get_issue_tracker()
+                                await tracker.add_label(repo, str(pr_number), "ag/review-pending")
+                            detail = f"PR #{pr_number} rebased." if pr_number else None
+                            stage = "pr_created" if pr_number else "review_pending"
+                            await self._update_status(repo, issue_id, stage, detail)
                         else:
                             # Implementation done — mark for review and notify owner
                             await labels_mgr.transition_to(repo, issue_id, "ag/review-pending")
@@ -565,21 +593,22 @@ class Scheduler:
                                 await tracker.add_label(repo, str(pr_number), "ag/review-pending")
                             await self._assign_and_tag_owner(repo, issue_id, pr_number)
 
-                        # Update status comment
-                        if pr_number:
-                            detail = f"PR #{pr_number} created."
-                            stage = "pr_created"
-                        elif branch:
-                            detail = (
-                                f"Implementation pushed to branch `{branch}` "
-                                f"but no PR was created automatically. "
-                                f"Please create a PR manually from this branch."
-                            )
-                            stage = "review_pending"
-                        else:
-                            detail = None
-                            stage = "completed" if execution.mode == "plan" else "review_pending"
-                        await self._update_status(repo, issue_id, stage, detail)
+                        # Update status comment (skip for scout/rebase — they handle their own)
+                        if execution.mode not in ("scout", "rebase"):
+                            if pr_number:
+                                detail = f"PR #{pr_number} created."
+                                stage = "pr_created"
+                            elif branch:
+                                detail = (
+                                    f"Implementation pushed to branch `{branch}` "
+                                    f"but no PR was created automatically. "
+                                    f"Please create a PR manually from this branch."
+                                )
+                                stage = "review_pending"
+                            else:
+                                detail = None
+                                stage = "completed" if execution.mode == "plan" else "review_pending"
+                            await self._update_status(repo, issue_id, stage, detail)
 
         # Process any pending nudges now that we have capacity
         await self._process_pending_nudges()
@@ -636,6 +665,89 @@ class Scheduler:
                         await self._update_status(repo, issue_id, "failed", detail)
 
         await self._process_pending_nudges()
+
+    # -------------------------------------------------------------------------
+    # Sub-issue queue advancement
+    # -------------------------------------------------------------------------
+
+    async def _advance_sub_issue_queue(self, repo: str, issue_id: str) -> None:
+        """When a sub-issue PR is merged, activate the next queued sibling."""
+        tracker = get_issue_tracker()
+        try:
+            issue = await tracker.get_issue(repo, issue_id)
+        except Exception:
+            return
+
+        # Check if this issue has a parent (is a sub-issue)
+        if not issue.parent_id:
+            return
+
+        # Get the parent's sub-issue order from metadata
+        parent_state = await self._db.get_issue_state(int(issue.parent_id), repo)
+        if not parent_state:
+            return
+        metadata = parent_state.get("metadata") or {}
+        if isinstance(metadata, str):
+            import json
+            metadata = json.loads(metadata)
+
+        sub_order = metadata.get("sub_issue_order", [])
+        if not sub_order:
+            return
+
+        # Find the next queued sub-issue in order
+        labels_mgr = get_label_manager()
+        activated = False
+        for sub_num in sub_order:
+            if str(sub_num) == issue_id:
+                continue  # Skip the one that just merged
+            try:
+                sub = await tracker.get_issue(repo, str(sub_num))
+                if "ag/queued" in sub.labels:
+                    await labels_mgr.transition_to(repo, str(sub_num), "ag/todo")
+                    logger.info(
+                        f"Sub-issue #{sub_num}: activated (next in queue after #{issue_id} merged)"
+                    )
+                    activated = True
+                    break  # Only activate one
+            except Exception as e:
+                logger.warning(f"Failed to check sub-issue #{sub_num}: {e}")
+
+        # Update progress comment on parent
+        if activated:
+            await self._update_progress_comment(repo, issue.parent_id, sub_order)
+
+    async def _update_progress_comment(self, repo: str, parent_id: str, sub_order: list[int]) -> None:
+        """Update the progress comment on the parent issue."""
+        tracker = get_issue_tracker()
+        lines = [f"## Implementation Plan ({len(sub_order)} steps)\n"]
+
+        for i, sub_num in enumerate(sub_order):
+            try:
+                sub = await tracker.get_issue(repo, str(sub_num))
+                title = sub.title.replace(f"[Sub #{parent_id}] ", "")
+                if "ag/done" in sub.labels or sub.status.value == "closed":
+                    icon = "\u2705"  # check mark
+                    status = "merged"
+                elif "ag/in-progress" in sub.labels or "ag/review-pending" in sub.labels:
+                    icon = "\U0001f7e2"  # green circle
+                    status = "in progress"
+                elif "ag/todo" in sub.labels:
+                    icon = "\U0001f7e1"  # yellow circle
+                    status = "next up"
+                elif "ag/failed" in sub.labels:
+                    icon = "\u274c"  # X
+                    status = "failed"
+                else:
+                    icon = "\u23f3"  # hourglass
+                    status = "queued"
+                lines.append(f"{i+1}. {icon} #{sub_num} {title} — {status}")
+            except Exception:
+                lines.append(f"{i+1}. \u2753 #{sub_num} — unable to fetch")
+
+        lines.append("\nSteps execute sequentially. Merge each PR to trigger the next step.")
+
+        await self._update_status(repo, parent_id, "in_progress", "\n".join(lines))
 
     # -------------------------------------------------------------------------
     # Helpers
