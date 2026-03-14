@@ -235,8 +235,14 @@ class Scheduler:
         repo = payload.get("repo")
         pr_number = payload.get("pr_number")
         comment_body = payload.get("comment_body", "")
+        comment_author = payload.get("comment_author", "")
 
         if not repo or not pr_number:
+            return
+
+        # Ignore bot comments — prevents feedback loop where agent-grid's own
+        # comments trigger new address_review launches
+        if comment_author.endswith("[bot]") or comment_author == "agent-grid":
             return
 
         # Fetch the PR to get the branch name
