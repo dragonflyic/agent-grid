@@ -1,8 +1,8 @@
-"""End-to-end test: scan -> classify -> pick easiest -> spawn Fly Machine -> show logs.
+"""End-to-end test: scan -> sanity check -> pick first actionable -> spawn Fly Machine -> show logs.
 
 Uses the real engine pipeline:
 - Scanner (Phase 1) to find unprocessed issues
-- Classifier (Phase 2) to classify via Claude API
+- Classifier (Phase 2) to sanity-check via Claude API
 - prompt_builder to generate the agent prompt
 - FlyMachinesClient to spawn a real ephemeral worker
 
@@ -119,25 +119,23 @@ async def main():
             labels_str = f" [{', '.join(iss.labels)}]" if iss.labels else ""
             print(f"  {i + 1}. #{iss.number}: {iss.title}{labels_str}")
 
-        print("\nPhase 2: Classifying (coordinator.classifier)...")
+        print("\nPhase 2: Sanity checking (coordinator.classifier)...")
         classifier = get_classifier()
-        classified = []
+        actionable = []
         for iss in candidates:
-            c = await classifier.classify(iss)
-            classified.append((iss, c))
-            sym = {"SIMPLE": "+", "COMPLEX": "*", "BLOCKED": "!", "SKIP": "-"}.get(c.category, "?")
-            print(f"  [{sym}] #{iss.number}: {c.category} (complexity={c.estimated_complexity}) -- {c.reason}")
+            s = await classifier.sanity_check(iss)
+            sym = {"PROCEED": "+", "SKIP": "-"}.get(s.verdict, "?")
+            print(f"  [{sym}] #{iss.number}: {s.verdict} -- {s.reason}")
+            if s.verdict == "PROCEED":
+                actionable.append(iss)
 
-        simple = [(iss, c) for iss, c in classified if c.category == "SIMPLE"]
-        if not simple:
-            print("\nNo SIMPLE issues. Picking least complex.")
-            classified.sort(key=lambda x: x[1].estimated_complexity)
-            issue, cl = classified[0]
-        else:
-            simple.sort(key=lambda x: x[1].estimated_complexity)
-            issue, cl = simple[0]
+        if not actionable:
+            print("\nNo actionable issues found (all SKIP).")
+            await tracker.close()
+            return
 
-        classification_info = f"{cl.category} (complexity={cl.estimated_complexity}): {cl.reason}"
+        issue = actionable[0]
+        classification_info = "PROCEED (sanity check passed)"
 
     print(f"\n{'~' * 60}")
     print(f"  Selected: #{issue.number} -- {issue.title}")
