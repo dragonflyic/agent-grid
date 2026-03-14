@@ -17,6 +17,8 @@ AG_LABELS = {
     "ag/blocked",
     "ag/waiting",
     "ag/planning",
+    "ag/scouting",
+    "ag/queued",
     "ag/review-pending",
     "ag/done",
     "ag/failed",

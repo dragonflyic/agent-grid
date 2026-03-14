@@ -102,6 +102,7 @@ class AgentLauncher:
         stage_map = {
             "implement": "launched",
             "plan": "planning",
+            "scout": "scouting",
             "fix_ci": "ci_fix",
             "address_review": "addressing_review",
             "retry_with_feedback": "retrying",
