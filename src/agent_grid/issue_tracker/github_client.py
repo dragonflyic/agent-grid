@@ -1,5 +1,6 @@
 """GitHub API implementation of issue tracker."""
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -56,11 +57,43 @@ class GitHubClient(IssueTracker):
         token = await self._app_auth.get_installation_token()
         self._client.headers["Authorization"] = f"Bearer {token}"
 
+    async def _get_with_retry(
+        self,
+        url: str,
+        *,
+        params: dict | None = None,
+        max_retries: int = 3,
+    ) -> httpx.Response:
+        """GET with retry on transient server errors (502, 503, 504).
+
+        Retries with exponential backoff (1s, 2s, 4s). Only retries GET
+        requests since they are idempotent.
+        """
+        last_error: httpx.HTTPStatusError | None = None
+        for attempt in range(max_retries + 1):
+            response = await self._client.get(url, params=params)
+            if response.status_code not in (502, 503, 504):
+                return response
+            last_error = httpx.HTTPStatusError(
+                f"Server error '{response.status_code}'",
+                request=response.request,
+                response=response,
+            )
+            if attempt < max_retries:
+                delay = 2**attempt
+                logger.warning(
+                    f"GitHub API {response.status_code} on {url}, "
+                    f"retrying in {delay}s (attempt {attempt + 1}/{max_retries})"
+                )
+                await asyncio.sleep(delay)
+        # All retries exhausted — raise the last error
+        raise last_error  # type: ignore[misc]
+
     async def get_issue(self, repo: str, issue_id: str) -> IssueInfo:
         """Get information about a GitHub issue including comments and parent."""
         await self._ensure_auth()
         # Fetch issue
-        response = await self._client.get(f"/repos/{repo}/issues/{issue_id}")
+        response = await self._get_with_retry(f"/repos/{repo}/issues/{issue_id}")
         response.raise_for_status()
         data = response.json()
 
@@ -89,7 +122,7 @@ class GitHubClient(IssueTracker):
         page = 1
 
         while True:
-            response = await self._client.get(
+            response = await self._get_with_retry(
                 f"/repos/{repo}/issues/{issue_id}/comments",
                 params={"per_page": 100, "page": page},
             )
@@ -145,7 +178,7 @@ class GitHubClient(IssueTracker):
 
         while True:
             params["page"] = page
-            response = await self._client.get(f"/repos/{repo}/issues", params=params)
+            response = await self._get_with_retry(f"/repos/{repo}/issues", params=params)
             response.raise_for_status()
             data = response.json()
 
@@ -177,7 +210,7 @@ class GitHubClient(IssueTracker):
         page = 1
 
         while True:
-            response = await self._client.get(
+            response = await self._get_with_retry(
                 f"/repos/{repo}/issues/{parent_id}/sub_issues",
                 params={"per_page": 100, "page": page},
             )
@@ -431,7 +464,7 @@ class GitHubClient(IssueTracker):
         await self._ensure_auth()
         owner = repo.split("/")[0]
         try:
-            response = await self._client.get(
+            response = await self._get_with_retry(
                 f"/repos/{repo}/pulls",
                 params={"head": f"{owner}:{branch}", "state": "open", "per_page": 1},
             )
@@ -467,7 +500,7 @@ class GitHubClient(IssueTracker):
         """
         await self._ensure_auth()
         try:
-            response = await self._client.get(
+            response = await self._get_with_retry(
                 f"/repos/{repo}/commits/{ref}/check-runs",
                 params={"status": status, "per_page": 100},
             )
@@ -481,7 +514,7 @@ class GitHubClient(IssueTracker):
         """List open pull requests."""
         await self._ensure_auth()
         try:
-            response = await self._client.get(
+            response = await self._get_with_retry(
                 f"/repos/{repo}/pulls",
                 params={"state": "open", **params},
             )
@@ -495,7 +528,7 @@ class GitHubClient(IssueTracker):
         """Get reviews for a pull request."""
         await self._ensure_auth()
         try:
-            response = await self._client.get(
+            response = await self._get_with_retry(
                 f"/repos/{repo}/pulls/{pr_number}/reviews",
                 params={"per_page": 100},
             )
@@ -509,7 +542,7 @@ class GitHubClient(IssueTracker):
         """Get inline/review comments for a pull request."""
         await self._ensure_auth()
         try:
-            response = await self._client.get(
+            response = await self._get_with_retry(
                 f"/repos/{repo}/pulls/{pr_number}/comments",
                 params={"per_page": 100},
             )
@@ -523,7 +556,7 @@ class GitHubClient(IssueTracker):
         """Fetch a single PR by number."""
         await self._ensure_auth()
         try:
-            response = await self._client.get(f"/repos/{repo}/pulls/{pr_number}")
+            response = await self._get_with_retry(f"/repos/{repo}/pulls/{pr_number}")
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -537,7 +570,7 @@ class GitHubClient(IssueTracker):
             params: dict = {"per_page": 50}
             if since:
                 params["since"] = since
-            response = await self._client.get(
+            response = await self._get_with_retry(
                 f"/repos/{repo}/issues/{issue_id}/comments",
                 params=params,
             )
@@ -586,6 +619,26 @@ class GitHubClient(IssueTracker):
         except Exception as e:
             logger.error(f"Error creating label {name}: {e}")
             return False
+
+    async def get_reference_status(self, repo: str, ref_num: str) -> dict:
+        """Get the status of a referenced issue or PR, detecting merged PRs."""
+        await self._ensure_auth()
+        try:
+            resp = await self._get_with_retry(f"/repos/{repo}/issues/{ref_num}")
+            resp.raise_for_status()
+            data = resp.json()
+
+            title = data.get("title", "")
+            state = data.get("state", "open").upper()
+
+            # Check if this is a PR and whether it was merged
+            pr_data = data.get("pull_request")
+            if pr_data and pr_data.get("merged_at"):
+                state = "MERGED"
+
+            return {"title": title, "status": state}
+        except Exception:
+            return {"title": "", "status": "UNKNOWN"}
 
     async def close(self) -> None:
         """Close the HTTP client."""

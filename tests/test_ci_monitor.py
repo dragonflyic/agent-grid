@@ -15,8 +15,9 @@ def _make_pr(number: int, branch: str, sha: str) -> dict:
 
 
 class FakeResponse:
-    def __init__(self, data):
+    def __init__(self, data, status_code=200):
         self._data = data
+        self.status_code = status_code
 
     def raise_for_status(self):
         pass

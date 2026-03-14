@@ -403,7 +403,7 @@ class Scheduler:
         from .classifier import get_classifier
 
         classifier = get_classifier()
-        classification = await classifier.classify(issue)
+        classification = await classifier.classify(issue, repo)
 
         await self._db.upsert_issue_state(
             issue_number=issue.number,
@@ -566,10 +566,19 @@ class Scheduler:
                             await self._assign_and_tag_owner(repo, issue_id, pr_number)
 
                         # Update status comment
-                        detail = f"PR #{pr_number} created." if pr_number else None
-                        stage = "completed" if execution.mode == "plan" else "review_pending"
                         if pr_number:
+                            detail = f"PR #{pr_number} created."
                             stage = "pr_created"
+                        elif branch:
+                            detail = (
+                                f"Implementation pushed to branch `{branch}` "
+                                f"but no PR was created automatically. "
+                                f"Please create a PR manually from this branch."
+                            )
+                            stage = "review_pending"
+                        else:
+                            detail = None
+                            stage = "completed" if execution.mode == "plan" else "review_pending"
                         await self._update_status(repo, issue_id, stage, detail)
 
         # Process any pending nudges now that we have capacity

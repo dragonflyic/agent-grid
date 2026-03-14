@@ -105,6 +105,7 @@ class AgentLauncher:
             "fix_ci": "ci_fix",
             "address_review": "addressing_review",
             "retry_with_feedback": "retrying",
+            "rebase": "rebasing",
         }
         await self._post_status(repo, issue_id, stage_map.get(mode, "in_progress"))
 
@@ -362,6 +363,31 @@ class AgentLauncher:
         )
         if launched:
             logger.info(f"Issue #{issue_id}: launched CI fix agent for '{check_info.get('check_name')}'")
+        return launched
+
+    async def launch_rebase(self, repo: str, pr_info: dict) -> bool:
+        """Launch an agent to rebase a PR branch and resolve merge conflicts."""
+        issue_id = pr_info["issue_id"]
+        if await self.has_active_execution(issue_id):
+            return False
+
+        issue = await self._tracker.get_issue(repo, issue_id)
+        context = {
+            "pr_number": pr_info["pr_number"],
+            "existing_branch": pr_info["branch"],
+        }
+        prompt = build_prompt(issue, repo, mode="rebase", context=context)
+
+        launched = await self.claim_and_launch(
+            issue_id=issue_id,
+            repo_url=f"https://github.com/{repo}.git",
+            prompt=prompt,
+            mode="rebase",
+            issue_number=int(issue_id),
+            context=context,
+        )
+        if launched:
+            logger.info(f"PR #{pr_info['pr_number']}: launched rebase agent for merge conflicts")
         return launched
 
     async def enrich_check_output(self, repo: str, check_info: dict) -> dict:

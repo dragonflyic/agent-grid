@@ -248,6 +248,19 @@ class IssueTracker(ABC):
         """Create a label in the repo. Returns True if created, False if already exists."""
         return False
 
+    async def get_reference_status(self, repo: str, ref_num: str) -> dict:
+        """Get the status of a referenced issue or PR.
+
+        Returns dict with keys: title, status ("OPEN", "CLOSED", or "MERGED").
+        Default implementation uses get_issue(). GitHub client overrides to
+        detect merged PRs.
+        """
+        try:
+            info = await self.get_issue(repo, ref_num)
+            return {"title": info.title, "status": info.status.value.upper()}
+        except Exception:
+            return {"title": "", "status": "UNKNOWN"}
+
 
 # =============================================================================
 # Service Factory

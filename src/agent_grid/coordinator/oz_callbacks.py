@@ -32,7 +32,7 @@ def build_oz_callbacks(db, tracker) -> OzCallbacks:
                 if issue_id:
                     execution = await db.get_execution(execution_id)
                     repo = (
-                        execution.repo_url.replace("https://github.com/", "").rstrip(".git")
+                        execution.repo_url.replace("https://github.com/", "").removesuffix(".git")
                         if execution and execution.repo_url
                         else None
                     )

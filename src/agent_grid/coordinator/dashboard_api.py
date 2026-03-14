@@ -309,7 +309,7 @@ async def classify_issues(request: ClassifyRequest, repo: str | None = None) -> 
     for num in request.issue_numbers:
         try:
             issue = await tracker.get_issue(actual_repo, str(num))
-            classification = await classifier.classify(issue)
+            classification = await classifier.classify(issue, actual_repo)
             await db.upsert_issue_state(
                 issue_number=num,
                 repo=actual_repo,

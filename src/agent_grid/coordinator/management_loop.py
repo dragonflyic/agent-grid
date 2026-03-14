@@ -98,7 +98,7 @@ class ManagementLoop:
                 await self._db.record_pipeline_event(issue.number, repo, "budget_blocked", "launch", {"reason": reason})
                 break
 
-            classification = await classifier.classify(issue)
+            classification = await classifier.classify(issue, repo)
 
             await self._db.upsert_issue_state(
                 issue_number=issue.number,
@@ -173,6 +173,9 @@ class ManagementLoop:
                 seen_pr_issues[iid] = dict(pr_info)
         for pr_info in seen_pr_issues.values():
             await launcher.launch_review_handler(repo, pr_info)
+
+        # Phase 5b: Check for merge conflicts on agent PRs
+        await self._check_merge_conflicts(repo, launcher)
 
         # Phase 6: Monitor closed PRs with feedback
         closed_prs = await pr_monitor.check_closed_prs(repo)
@@ -281,7 +284,7 @@ class ManagementLoop:
                 break
 
             # Classify first
-            classification = await classifier.classify(issue)
+            classification = await classifier.classify(issue, repo)
 
             await self._db.upsert_issue_state(
                 issue_number=issue.number,
@@ -511,6 +514,62 @@ class ManagementLoop:
 
         if retried:
             logger.info(f"Phase 4c: Auto-retried {retried} failed issues")
+
+    async def _check_merge_conflicts(self, repo: str, launcher) -> None:
+        """Phase 5b: Check open agent PRs for merge conflicts.
+
+        For each open PR on an agent/* branch, fetches the individual PR to
+        check the `mergeable` field. If the PR has conflicts, launches a
+        rebase agent to resolve them.
+        """
+        prs = await self._tracker.list_open_prs(repo, per_page=100)
+        rebased = 0
+
+        for pr in prs:
+            head_branch = pr.get("head", {}).get("ref", "")
+            if not head_branch.startswith("agent/"):
+                continue
+
+            pr_number = pr["number"]
+
+            match = re.match(r"agent/(\d+)(?:-|$)", head_branch)
+            if not match:
+                continue
+            issue_id = match.group(1)
+
+            # Fetch individual PR to get mergeable status
+            pr_data = await self._tracker.get_pr_data(repo, pr_number)
+            if not pr_data:
+                continue
+
+            mergeable = pr_data.get("mergeable")
+            if mergeable is None or mergeable:
+                continue  # No conflicts or not computed yet
+
+            # Dedup: don't rebase the same HEAD SHA twice
+            issue_state = await self._db.get_issue_state(int(issue_id), repo)
+            metadata = (issue_state or {}).get("metadata") or {}
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            head_sha = pr_data.get("head", {}).get("sha", "")
+            if head_sha and metadata.get("last_rebase_sha") == head_sha:
+                continue
+
+            launched = await launcher.launch_rebase(repo, {
+                "pr_number": pr_number,
+                "issue_id": issue_id,
+                "branch": head_branch,
+            })
+            if launched:
+                await self._db.merge_issue_metadata(
+                    issue_number=int(issue_id),
+                    repo=repo,
+                    metadata_update={"last_rebase_sha": head_sha},
+                )
+                rebased += 1
+
+        if rebased:
+            logger.info(f"Phase 5b: Launched {rebased} rebase agents for merge conflicts")
 
     async def run_once(self) -> None:
         """Run a single cycle (for testing)."""
