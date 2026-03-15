@@ -1,5 +1,6 @@
 """PostgreSQL database access for coordinator using SQLAlchemy 2.0 async ORM."""
 
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -20,6 +21,29 @@ from .models import (
     PipelineEventModel,
 )
 from .public_api import NudgeRequest
+
+
+def ensure_metadata_dict(metadata) -> dict:
+    """Normalize metadata from DB to a dict.
+
+    Handles: None, str (JSON), dict, list (JSONB array -- unwrap first element or return empty).
+    """
+    if metadata is None:
+        return {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    if isinstance(metadata, list):
+        # JSONB arrays: unwrap first dict element if present
+        for item in metadata:
+            if isinstance(item, dict):
+                return item
+        return {}
+    if isinstance(metadata, dict):
+        return metadata
+    return {}
 
 
 class Database:

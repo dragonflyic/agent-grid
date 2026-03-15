@@ -240,18 +240,14 @@ async def get_issue_state(issue_number: int, repo: str | None = None) -> dict[st
 async def reset_ci_fix_count(issue_number: int, repo: str | None = None) -> dict[str, Any]:
     """Reset the CI fix counter for an issue."""
     from ..config import settings
-    from .database import get_database
+    from .database import ensure_metadata_dict, get_database
 
     db = get_database()
     actual_repo = repo or settings.target_repo
     state = await db.get_issue_state(issue_number, actual_repo)
     if not state:
         raise HTTPException(status_code=404, detail="Issue state not found")
-    metadata = state.get("metadata") or {}
-    if isinstance(metadata, str):
-        import json
-
-        metadata = json.loads(metadata)
+    metadata = ensure_metadata_dict(state.get("metadata"))
     metadata.pop("ci_fix_count", None)
     metadata.pop("last_ci_check_sha", None)
     await db.upsert_issue_state(issue_number=issue_number, repo=actual_repo, metadata=metadata)

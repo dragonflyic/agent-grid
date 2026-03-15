@@ -27,7 +27,7 @@ from .agent_launcher import get_agent_launcher
 from .blocker_resolver import get_blocker_resolver
 from .budget_manager import get_budget_manager
 from .classifier import get_classifier
-from .database import get_database
+from .database import ensure_metadata_dict, get_database
 from .dependency_resolver import get_dependency_resolver
 from .pr_monitor import get_pr_monitor
 from .scanner import get_scanner
@@ -519,9 +519,7 @@ class ManagementLoop:
 
             # Dedup: don't rebase the same HEAD SHA twice
             issue_state = await self._db.get_issue_state(int(issue_id), repo)
-            metadata = (issue_state or {}).get("metadata") or {}
-            if isinstance(metadata, str):
-                metadata = json.loads(metadata)
+            metadata = ensure_metadata_dict((issue_state or {}).get("metadata"))
             head_sha = pr_data.get("head", {}).get("sha", "")
             if head_sha and metadata.get("last_rebase_sha") == head_sha:
                 continue
