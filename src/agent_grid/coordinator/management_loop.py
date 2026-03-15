@@ -15,7 +15,6 @@ Runs every N seconds (default 1 hour). Each cycle performs 10 phases:
 """
 
 import asyncio
-import json
 import logging
 import re
 
@@ -171,9 +170,7 @@ class ManagementLoop:
             ci_issue_id = issue_match.group(1)
 
             ci_state = await self._db.get_issue_state(int(ci_issue_id), repo)
-            ci_meta = (ci_state or {}).get("metadata") or {}
-            if isinstance(ci_meta, str):
-                ci_meta = json.loads(ci_meta)
+            ci_meta = ensure_metadata_dict((ci_state or {}).get("metadata"))
             ci_fix_count = ci_meta.get("ci_fix_count", 0)
             if ci_fix_count >= settings.max_ci_fix_retries:
                 logger.warning(
