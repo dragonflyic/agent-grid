@@ -38,9 +38,17 @@ class AgentLauncher:
     ) -> bool:
         """Atomically claim an issue and launch the agent.
 
-        Claims the DB row FIRST to prevent races, then launches.
-        Returns True if the agent was launched, False if claim failed.
+        Checks budget first, then claims the DB row to prevent races, then launches.
+        Returns True if the agent was launched, False if budget exhausted or claim failed.
         """
+        from .budget_manager import get_budget_manager
+
+        budget = get_budget_manager()
+        can_launch, reason = await budget.can_launch_agent()
+        if not can_launch:
+            logger.info(f"Issue #{issue_id}: budget check failed — {reason}")
+            return False
+
         execution_id = uuid4()
         execution = AgentExecution(
             id=execution_id,
