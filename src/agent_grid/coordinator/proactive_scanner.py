@@ -10,7 +10,7 @@ import logging
 from ..config import settings
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.public_api import IssueInfo, IssueStatus
-from .database import get_database
+from .database import ensure_metadata_dict, get_database
 
 logger = logging.getLogger("agent_grid.proactive_scanner")
 
@@ -48,11 +48,7 @@ class ProactiveScanner:
             # Check if we already evaluated this issue
             issue_state = await self._db.get_issue_state(issue.number, repo)
             if issue_state:
-                metadata = issue_state.get("metadata") or {}
-                if isinstance(metadata, str):
-                    import json
-
-                    metadata = json.loads(metadata)
+                metadata = ensure_metadata_dict(issue_state.get("metadata"))
                 if metadata.get("proactive_skipped"):
                     continue
                 if metadata.get("proactive_picked"):

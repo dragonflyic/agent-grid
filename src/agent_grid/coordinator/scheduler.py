@@ -26,7 +26,7 @@ from ..execution_grid import (
 from ..issue_tracker import get_issue_tracker
 from ..issue_tracker.label_manager import get_label_manager
 from .budget_manager import get_budget_manager
-from .database import get_database
+from .database import ensure_metadata_dict, get_database
 from .nudge_handler import get_nudge_handler
 from .prompt_builder import build_prompt
 
@@ -341,11 +341,7 @@ class Scheduler:
 
         # Deduplicate: skip if we already processed this SHA
         issue_state = await self._db.get_issue_state(int(issue_id), repo)
-        metadata = (issue_state or {}).get("metadata") or {}
-        if isinstance(metadata, str):
-            import json
-
-            metadata = json.loads(metadata)
+        metadata = ensure_metadata_dict((issue_state or {}).get("metadata"))
 
         if head_sha and metadata.get("last_ci_check_sha") == head_sha:
             logger.info(f"CI fix already attempted for SHA {head_sha[:8]}, skipping")
@@ -669,11 +665,7 @@ class Scheduler:
         parent_state = await self._db.get_issue_state(int(issue.parent_id), repo)
         if not parent_state:
             return
-        metadata = parent_state.get("metadata") or {}
-        if isinstance(metadata, str):
-            import json
-
-            metadata = json.loads(metadata)
+        metadata = ensure_metadata_dict(parent_state.get("metadata"))
 
         sub_order = metadata.get("sub_issue_order", [])
         if not sub_order:

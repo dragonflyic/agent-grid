@@ -4,13 +4,12 @@ Checks open agent PRs for failing CI checks. Uses cron_state cursor
 to avoid re-processing the same failures across cycles.
 """
 
-import json
 import logging
 import re
 from datetime import datetime, timezone
 
 from ..issue_tracker import get_issue_tracker
-from .database import get_database
+from .database import ensure_metadata_dict, get_database
 from .pr_monitor import _normalize_timestamp
 
 logger = logging.getLogger("agent_grid.ci_monitor")
@@ -49,9 +48,7 @@ class CIMonitor:
 
             # Dedup: skip if we already processed this SHA
             issue_state = await self._db.get_issue_state(int(issue_id), repo)
-            metadata = (issue_state or {}).get("metadata") or {}
-            if isinstance(metadata, str):
-                metadata = json.loads(metadata)
+            metadata = ensure_metadata_dict((issue_state or {}).get("metadata"))
             if metadata.get("last_ci_check_sha") == head_sha:
                 continue
 
