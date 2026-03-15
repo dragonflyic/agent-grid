@@ -136,11 +136,11 @@ class TestProactiveScannerFiltering:
 class TestProactiveScanConfig:
     """Tests for proactive scan configuration."""
 
-    def test_default_disabled(self):
-        """Proactive scan should be disabled by default."""
+    def test_default_enabled(self):
+        """Proactive scan should be enabled by default."""
         from agent_grid.config import settings
 
-        assert settings.proactive_scan_enabled is False
+        assert settings.proactive_scan_enabled is True
 
     def test_default_min_score(self):
         """Default proactive min score should be 9."""
