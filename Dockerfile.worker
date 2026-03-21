@@ -32,8 +32,9 @@ RUN useradd -m -s /bin/bash agent && chown -R agent:agent /workspace
 RUN mkdir -p /home/agent/.claude && chown -R agent:agent /home/agent/.claude
 USER agent
 
-# Copy entrypoint
-COPY --chown=agent:agent scripts/worker-entrypoint.sh /worker-entrypoint.sh
-RUN chmod +x /worker-entrypoint.sh
+# Copy entrypoint and helper scripts
+COPY --chown=agent:agent scripts/worker-entrypoint-v2.sh /worker-entrypoint.sh
+COPY --chown=agent:agent scripts/stream-to-coordinator.py /scripts/stream-to-coordinator.py
+RUN chmod +x /worker-entrypoint.sh /scripts/stream-to-coordinator.py
 
 ENTRYPOINT ["/worker-entrypoint.sh"]
