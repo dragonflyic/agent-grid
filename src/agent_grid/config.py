@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # Claude Code CLI worker settings
     claude_credentials_secret: str = ""  # AWS Secrets Manager ARN for Claude creds
     max_turns_per_execution: int = 200
-    max_budget_per_execution_usd: float = 5.0
+    max_budget_per_execution_usd: float = 50.0
 
     # Anthropic API (for classification/planning)
     anthropic_api_key: str = ""

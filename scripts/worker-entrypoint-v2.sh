@@ -104,6 +104,7 @@ fi
 
 $CLAUDE_CMD "$PROMPT" \
     --session-id "$EXECUTION_ID" \
+    --model "${CLAUDE_MODEL:-claude-opus-4-6}" \
     --output-format stream-json \
     --verbose \
     --dangerously-skip-permissions \
