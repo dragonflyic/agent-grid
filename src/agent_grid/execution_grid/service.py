@@ -100,7 +100,7 @@ def get_execution_grid() -> ExecutionGrid:
     global _service, _fly_grid, _claude_code_grid
 
     if settings.deployment_mode == "coordinator":
-        if settings.execution_backend == "claude-code":
+        if settings.execution_backend in ("claude-code", "oz"):  # oz is an alias during migration
             if _claude_code_grid is None:
                 from .claude_code_grid import get_claude_code_execution_grid
 

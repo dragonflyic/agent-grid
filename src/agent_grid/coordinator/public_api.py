@@ -192,7 +192,7 @@ async def agent_status_callback(body: AgentStatusCallback) -> dict[str, str]:
             pr_number=body.pr_number,
             checkpoint=body.checkpoint,
         )
-    elif settings.execution_backend == "claude-code":
+    elif settings.execution_backend in ("claude-code", "oz"):
         from ..execution_grid.claude_code_grid import get_claude_code_execution_grid
 
         grid = get_claude_code_execution_grid()
