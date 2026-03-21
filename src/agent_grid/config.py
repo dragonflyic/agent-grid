@@ -51,8 +51,8 @@ class Settings(BaseSettings):
     # Target repository
     target_repo: str = ""  # e.g. "myorg/myrepo"
 
-    # Execution backend: "oz" (Warp Oz) or "fly" (Fly Machines)
-    execution_backend: Literal["oz", "fly"] = "oz"
+    # Execution backend: "oz" (Warp Oz), "fly" (Fly Machines), or "claude-code" (Claude Code CLI)
+    execution_backend: Literal["oz", "fly", "claude-code"] = "claude-code"
 
     # Warp Oz configuration
     warp_api_key: str = ""

@@ -167,6 +167,9 @@ class AgentStatusCallback(BaseModel):
     branch: str | None = None
     pr_number: int | None = None
     checkpoint: dict | None = None
+    cost_usd: float | None = None
+    session_id: str | None = None
+    session_s3_key: str | None = None
 
 
 @coordinator_router.post("/agent-status")
@@ -177,23 +180,38 @@ async def agent_status_callback(body: AgentStatusCallback) -> dict[str, str]:
     """
     from ..config import settings
 
-    if settings.execution_backend != "fly":
+    if settings.execution_backend == "fly":
+        from ..execution_grid.fly_grid import get_fly_execution_grid
+
+        grid = get_fly_execution_grid()
+        await grid.handle_agent_result(
+            execution_id=UUID(body.execution_id),
+            status=body.status,
+            result=body.result,
+            branch=body.branch,
+            pr_number=body.pr_number,
+            checkpoint=body.checkpoint,
+        )
+    elif settings.execution_backend == "claude-code":
+        from ..execution_grid.claude_code_grid import get_claude_code_execution_grid
+
+        grid = get_claude_code_execution_grid()
+        await grid.handle_agent_result(
+            execution_id=UUID(body.execution_id),
+            status=body.status,
+            result=body.result,
+            branch=body.branch,
+            pr_number=body.pr_number,
+            cost_usd=body.cost_usd,
+            session_id=body.session_id,
+            session_s3_key=body.session_s3_key,
+        )
+    else:
         raise HTTPException(
             status_code=400,
-            detail="Agent status callback is only available with the Fly execution backend",
+            detail="Agent status callback is only available with the Fly or Claude Code execution backend",
         )
 
-    from ..execution_grid.fly_grid import get_fly_execution_grid
-
-    grid = get_fly_execution_grid()
-    await grid.handle_agent_result(
-        execution_id=UUID(body.execution_id),
-        status=body.status,
-        result=body.result,
-        branch=body.branch,
-        pr_number=body.pr_number,
-        checkpoint=body.checkpoint,
-    )
     return {"status": "ok"}
 
 
