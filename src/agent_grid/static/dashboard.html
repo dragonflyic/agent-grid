@@ -545,7 +545,20 @@ function getSortedIssues(issues) {
 }
 
 function renderIssues() {
-  const sorted = getSortedIssues(currentIssues);
+  // Client-side search filter
+  const search = (document.getElementById('search-input').value || '').trim().toLowerCase();
+  let filtered = currentIssues;
+  if (search) {
+    filtered = currentIssues.filter(i =>
+      String(i.number || '').includes(search) ||
+      (i.title || '').toLowerCase().includes(search) ||
+      (i.author || '').toLowerCase().includes(search) ||
+      (i.pipeline_stage || '').toLowerCase().includes(search) ||
+      (i.classification || '').toLowerCase().includes(search) ||
+      (i.ag_labels || []).some(l => l.toLowerCase().includes(search))
+    );
+  }
+  const sorted = getSortedIssues(filtered);
 
   // Update sort arrows
   document.querySelectorAll('.sort-arrow').forEach(el => { el.textContent = ''; });
@@ -629,7 +642,14 @@ function sortBy(col) {
 let debounceTimer = null;
 function debouncedRenderIssues() {
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => loadIssues(0), 300);
+  const search = (document.getElementById('search-input').value || '').trim();
+  if (search && currentIssues.length > 0) {
+    // Client-side filter from already loaded data — instant, no flicker
+    debounceTimer = setTimeout(() => renderIssues(), 100);
+  } else {
+    // No search or no data — fetch from server
+    debounceTimer = setTimeout(() => loadIssues(0), 300);
+  }
 }
 
 let lastClassifications = {};
@@ -964,14 +984,24 @@ async function loadTimeline(executionId, containerId) {
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+function hasActiveFilters() {
+  return !!(document.getElementById('search-input').value.trim() ||
+    document.getElementById('stage-filter').value ||
+    document.getElementById('class-filter').value);
+}
+
 async function refresh(initial = false) {
   document.getElementById('last-refresh').textContent = fmtRelative(new Date().toISOString());
   resetRefreshBar();
   if (initial) {
     await Promise.all([loadOverview(), loadIssues(), loadActivity(), loadExecutions()]);
   } else {
-    // Silent refresh: don't flash "Loading..." or clear selections
-    await Promise.all([loadOverview(), loadIssues(undefined, {silent: true}), loadActivity(), loadExecutions()]);
+    // Skip issues refresh when user has active search/filters to avoid disruption
+    const tasks = [loadOverview(), loadActivity(), loadExecutions()];
+    if (!hasActiveFilters()) {
+      tasks.push(loadIssues(undefined, {silent: true}));
+    }
+    await Promise.all(tasks);
   }
 }
 
