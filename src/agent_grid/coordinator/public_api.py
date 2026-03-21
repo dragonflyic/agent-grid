@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..execution_grid import AgentExecution, ExecutionStatus
@@ -195,6 +195,39 @@ async def agent_status_callback(body: AgentStatusCallback) -> dict[str, str]:
         checkpoint=body.checkpoint,
     )
     return {"status": "ok"}
+
+
+@coordinator_router.post("/agent-events")
+async def receive_agent_events(request: Request) -> dict:
+    """Receive batched agent events from a Fly Machine worker.
+
+    Workers POST arrays of events during execution for real-time observability.
+    Events are stored in the agent_events DB table and viewable via the dashboard.
+    Non-critical — if this fails, events are still in the worker's events.jsonl on S3.
+    """
+    from .database import get_database
+
+    db = get_database()
+    events = await request.json()
+
+    if not isinstance(events, list):
+        events = [events]
+
+    stored = 0
+    for event in events:
+        try:
+            await db.record_agent_event(
+                execution_id=UUID(event["execution_id"]),
+                message_type=event.get("type", ""),
+                content=event.get("content", "")[:10000],
+                tool_name=event.get("tool_name"),
+                tool_id=event.get("tool_id"),
+            )
+            stored += 1
+        except Exception:
+            pass  # Best effort — don't fail the batch for one bad event
+
+    return {"received": len(events), "stored": stored}
 
 
 @coordinator_router.post("/executions/{execution_id}/cancel")
