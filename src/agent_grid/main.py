@@ -57,7 +57,7 @@ async def _setup_claude_credentials() -> None:
 async def _connect_and_start_services(db, logger) -> None:
     """Connect to database, then start services that depend on it."""
     # Load Claude subscription credentials from Secrets Manager
-    if settings.execution_backend == "claude-code":
+    if settings.execution_backend in ("claude-code", "oz"):
         await _setup_claude_credentials()
 
     for attempt in range(3):
@@ -92,7 +92,7 @@ async def _connect_and_start_services(db, logger) -> None:
     await event_persister.start()
 
     # Claude Code CLI backend
-    if settings.deployment_mode == "coordinator" and settings.execution_backend == "claude-code":
+    if settings.deployment_mode == "coordinator" and settings.execution_backend in ("claude-code", "oz"):
         from .coordinator.claude_code_callbacks import build_claude_code_callbacks
         from .execution_grid.claude_code_grid import get_claude_code_execution_grid
         from .issue_tracker import get_issue_tracker as _get_tracker
@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await scheduler.stop()
 
     # Shutdown Claude Code backend
-    if settings.deployment_mode == "coordinator" and settings.execution_backend == "claude-code":
+    if settings.deployment_mode == "coordinator" and settings.execution_backend in ("claude-code", "oz"):
         from .execution_grid.claude_code_grid import get_claude_code_execution_grid
 
         cli_grid = get_claude_code_execution_grid()

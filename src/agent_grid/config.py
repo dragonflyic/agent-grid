@@ -51,8 +51,9 @@ class Settings(BaseSettings):
     # Target repository
     target_repo: str = ""  # e.g. "myorg/myrepo"
 
-    # Execution backend: "fly" (Fly Machines) or "claude-code" (Claude Code CLI)
-    execution_backend: Literal["fly", "claude-code"] = "claude-code"
+    # Execution backend: "claude-code" (Claude Code CLI on Fly Machines) or "fly" (legacy Fly)
+    # "oz" is accepted as an alias for "claude-code" for backward compat during migration
+    execution_backend: Literal["fly", "claude-code", "oz"] = "claude-code"
 
     # Fly.io configuration (used when execution_backend="fly")
     fly_api_token: str = ""
