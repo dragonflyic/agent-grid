@@ -93,20 +93,20 @@ variable "dry_run" {
 }
 
 variable "execution_backend" {
-  description = "Execution backend: 'oz' (Warp Oz) or 'fly' (Fly Machines)"
+  description = "Execution backend: 'claude-code' (Claude Code CLI) or 'fly' (Fly Machines)"
   type        = string
-  default     = "oz"
+  default     = "claude-code"
 }
 
 variable "warp_api_key" {
-  description = "Warp Oz API key for cloud agent runs"
+  description = "DEPRECATED: Warp Oz API key (kept for secrets module compatibility)"
   type        = string
   sensitive   = true
   default     = ""
 }
 
 variable "oz_environment_id" {
-  description = "Warp Oz environment ID (pre-configured with repo and tools)"
+  description = "DEPRECATED: Warp Oz environment ID (no longer used)"
   type        = string
   default     = ""
 }

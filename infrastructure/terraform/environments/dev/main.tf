@@ -142,16 +142,19 @@ module "apprunner" {
   vpc_connector_security_groups = [aws_security_group.apprunner_private.id]
 
   environment_variables = {
-    AGENT_GRID_AWS_REGION          = var.aws_region
-    AGENT_GRID_DEPLOYMENT_MODE     = "coordinator"
-    AGENT_GRID_EXECUTION_BACKEND   = var.execution_backend
-    AGENT_GRID_ISSUE_TRACKER_TYPE  = "github"
-    AGENT_GRID_TARGET_REPO         = var.target_repo
-    AGENT_GRID_OZ_ENVIRONMENT_ID   = var.oz_environment_id
-    AGENT_GRID_FLY_APP_NAME        = var.fly_app_name
-    AGENT_GRID_FLY_WORKER_IMAGE    = var.fly_worker_image
-    AGENT_GRID_DRY_RUN             = var.dry_run ? "true" : "false"
-    AGENT_GRID_COORDINATOR_URL     = var.coordinator_url
+    AGENT_GRID_AWS_REGION                  = var.aws_region
+    AGENT_GRID_DEPLOYMENT_MODE             = "coordinator"
+    AGENT_GRID_EXECUTION_BACKEND           = var.execution_backend
+    AGENT_GRID_ISSUE_TRACKER_TYPE          = "github"
+    AGENT_GRID_TARGET_REPO                 = var.target_repo
+    AGENT_GRID_FLY_APP_NAME                = var.fly_app_name
+    AGENT_GRID_FLY_WORKER_IMAGE            = var.fly_worker_image
+    AGENT_GRID_DRY_RUN                     = var.dry_run ? "true" : "false"
+    AGENT_GRID_COORDINATOR_URL             = var.coordinator_url
+    AGENT_GRID_SESSION_S3_BUCKET           = "agent-grid-sessions"
+    AGENT_GRID_CLAUDE_CREDENTIALS_SECRET   = "agent-grid/claude-credentials"
+    AGENT_GRID_MAX_TURNS_PER_EXECUTION     = "200"
+    AGENT_GRID_MAX_BUDGET_PER_EXECUTION_USD = "5.0"
   }
 
   environment_secrets = merge(
@@ -190,19 +193,22 @@ module "ecs_scheduled_task" {
   secret_arns        = module.secrets.all_secret_arns
 
   environment_variables = {
-    AGENT_GRID_DEPLOYMENT_MODE           = "coordinator"
-    AGENT_GRID_EXECUTION_BACKEND         = var.execution_backend
-    AGENT_GRID_ISSUE_TRACKER_TYPE        = "github"
-    AGENT_GRID_TARGET_REPO               = var.target_repo
-    AGENT_GRID_OZ_ENVIRONMENT_ID         = var.oz_environment_id
-    AGENT_GRID_FLY_APP_NAME              = var.fly_app_name
-    AGENT_GRID_FLY_WORKER_IMAGE          = var.fly_worker_image
-    AGENT_GRID_DRY_RUN                   = var.dry_run ? "true" : "false"
-    AGENT_GRID_PROACTIVE_SCAN_ENABLED    = "true"
-    AGENT_GRID_GITHUB_PROJECT_OWNER      = var.github_project_owner
-    AGENT_GRID_GITHUB_PROJECT_NUMBER     = var.github_project_number
-    PYTHONPATH                           = "/app/src"
-    PYTHONUNBUFFERED                     = "1"
+    AGENT_GRID_DEPLOYMENT_MODE              = "coordinator"
+    AGENT_GRID_EXECUTION_BACKEND            = var.execution_backend
+    AGENT_GRID_ISSUE_TRACKER_TYPE           = "github"
+    AGENT_GRID_TARGET_REPO                  = var.target_repo
+    AGENT_GRID_FLY_APP_NAME                 = var.fly_app_name
+    AGENT_GRID_FLY_WORKER_IMAGE             = var.fly_worker_image
+    AGENT_GRID_DRY_RUN                      = var.dry_run ? "true" : "false"
+    AGENT_GRID_PROACTIVE_SCAN_ENABLED       = "true"
+    AGENT_GRID_GITHUB_PROJECT_OWNER         = var.github_project_owner
+    AGENT_GRID_GITHUB_PROJECT_NUMBER        = var.github_project_number
+    AGENT_GRID_SESSION_S3_BUCKET            = "agent-grid-sessions"
+    AGENT_GRID_CLAUDE_CREDENTIALS_SECRET    = "agent-grid/claude-credentials"
+    AGENT_GRID_MAX_TURNS_PER_EXECUTION      = "200"
+    AGENT_GRID_MAX_BUDGET_PER_EXECUTION_USD = "5.0"
+    PYTHONPATH                              = "/app/src"
+    PYTHONUNBUFFERED                        = "1"
   }
 
   environment_secrets = merge(
