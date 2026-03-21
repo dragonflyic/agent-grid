@@ -69,8 +69,6 @@ class MockDatabase:
     async def get_total_budget_usage(self, since=None):
         return {"tokens_used": 0, "duration_seconds": 0}
 
-    async def count_oz_runs_today(self):
-        return 0
 
 
 @pytest.fixture

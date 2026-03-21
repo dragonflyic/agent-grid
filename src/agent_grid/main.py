@@ -101,17 +101,6 @@ async def _connect_and_start_services(db, logger) -> None:
         cli_grid.set_callbacks(build_claude_code_callbacks(db, _get_tracker()))
         logger.info("Claude Code CLI execution grid initialized")
 
-    # Start Oz polling if using Oz backend — wire callbacks first
-    if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
-        from .coordinator.oz_callbacks import build_oz_callbacks
-        from .execution_grid.oz_grid import get_oz_execution_grid
-        from .issue_tracker import get_issue_tracker as _get_tracker
-
-        oz_grid = get_oz_execution_grid()
-        oz_grid.set_callbacks(build_oz_callbacks(db, _get_tracker()))
-        await oz_grid.start_polling()
-        logger.info(f"Oz polling started (interval={settings.oz_poll_interval_seconds}s)")
-
     app.state.services_ready = True
     logger.info("All services started")
 
@@ -159,13 +148,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         cli_grid = get_claude_code_execution_grid()
         await cli_grid.close()
-
-    # Stop Oz polling and close client if active
-    if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
-        from .execution_grid.oz_grid import get_oz_execution_grid
-
-        oz_grid = get_oz_execution_grid()
-        await oz_grid.close()
 
     await event_bus.stop()
 

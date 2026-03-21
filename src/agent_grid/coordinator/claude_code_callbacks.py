@@ -1,7 +1,7 @@
 """Claude Code execution grid callbacks — wired during application startup.
 
 Handles DB persistence, fallback PR detection/creation, and cost tracking
-when Claude Code CLI workers complete. Same pattern as oz_callbacks.py.
+when Claude Code CLI workers complete.
 """
 
 import logging

@@ -3,7 +3,6 @@
 from .claude_code_grid import ClaudeCodeExecutionGrid, get_claude_code_execution_grid
 from .event_bus import EventBus, event_bus
 from .fly_grid import FlyExecutionGrid, get_fly_execution_grid
-from .oz_grid import OzExecutionGrid, get_oz_execution_grid
 from .public_api import (
     # Type aliases
     AgentEventHandler,
@@ -42,7 +41,4 @@ __all__ = [
     # Fly Machines-based execution grid (coordinator mode)
     "FlyExecutionGrid",
     "get_fly_execution_grid",
-    # Warp Oz-based execution grid (coordinator mode)
-    "OzExecutionGrid",
-    "get_oz_execution_grid",
 ]

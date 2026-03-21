@@ -51,15 +51,8 @@ class Settings(BaseSettings):
     # Target repository
     target_repo: str = ""  # e.g. "myorg/myrepo"
 
-    # Execution backend: "oz" (Warp Oz), "fly" (Fly Machines), or "claude-code" (Claude Code CLI)
-    execution_backend: Literal["oz", "fly", "claude-code"] = "claude-code"
-
-    # Warp Oz configuration
-    warp_api_key: str = ""
-    oz_environment_id: str = ""
-    oz_model_id: str = "claude-sonnet-4-5-20250929"
-    oz_poll_interval_seconds: int = 30  # How often to poll Oz for run completion
-    max_oz_runs_per_day: int = 50  # Hard cap on Oz runs per day (cost control)
+    # Execution backend: "fly" (Fly Machines) or "claude-code" (Claude Code CLI)
+    execution_backend: Literal["fly", "claude-code"] = "claude-code"
 
     # Fly.io configuration (used when execution_backend="fly")
     fly_api_token: str = ""

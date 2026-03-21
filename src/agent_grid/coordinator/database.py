@@ -1,7 +1,7 @@
 """PostgreSQL database access for coordinator using SQLAlchemy 2.0 async ORM."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select, text, update
@@ -311,20 +311,6 @@ class Database:
                 "tokens_used": row.tokens,
                 "duration_seconds": row.duration,
             }
-
-    async def count_oz_runs_today(self) -> int:
-        """Count all executions created today (UTC).
-
-        When execution_backend="oz", every execution is an Oz run.
-        Counts all rows (not just external_run_id IS NOT NULL) so that
-        in-flight launches waiting for their Oz run ID are included.
-        """
-        async with self._session() as session:
-            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            result = await session.execute(
-                select(func.count()).select_from(ExecutionModel).where(ExecutionModel.created_at >= today_start)
-            )
-            return result.scalar_one()
 
     # -------------------------------------------------------------------------
     # Issue state operations

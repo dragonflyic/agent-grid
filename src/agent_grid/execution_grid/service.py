@@ -17,7 +17,6 @@ from .public_api import (
 if TYPE_CHECKING:
     from .claude_code_grid import ClaudeCodeExecutionGrid
     from .fly_grid import FlyExecutionGrid
-    from .oz_grid import OzExecutionGrid
 
 
 class ExecutionGridService(ExecutionGrid):
@@ -86,7 +85,6 @@ class ExecutionGridService(ExecutionGrid):
 # Global service instances
 _service: ExecutionGridService | None = None
 _fly_grid: "FlyExecutionGrid | None" = None
-_oz_grid: "OzExecutionGrid | None" = None
 _claude_code_grid: "ClaudeCodeExecutionGrid | None" = None
 
 
@@ -97,10 +95,9 @@ def get_execution_grid() -> ExecutionGrid:
     Returns different implementations based on deployment_mode and execution_backend:
     - deployment_mode="local": In-memory service that runs agents directly
     - deployment_mode="coordinator" + execution_backend="claude-code": Claude Code CLI on Fly
-    - deployment_mode="coordinator" + execution_backend="oz": Warp Oz cloud runs
     - deployment_mode="coordinator" + execution_backend="fly": Fly Machines workers
     """
-    global _service, _fly_grid, _oz_grid, _claude_code_grid
+    global _service, _fly_grid, _claude_code_grid
 
     if settings.deployment_mode == "coordinator":
         if settings.execution_backend == "claude-code":
@@ -109,12 +106,6 @@ def get_execution_grid() -> ExecutionGrid:
 
                 _claude_code_grid = get_claude_code_execution_grid()
             return _claude_code_grid
-        elif settings.execution_backend == "oz":
-            if _oz_grid is None:
-                from .oz_grid import get_oz_execution_grid
-
-                _oz_grid = get_oz_execution_grid()
-            return _oz_grid
         else:
             # Fly Machines-based implementation
             if _fly_grid is None:
