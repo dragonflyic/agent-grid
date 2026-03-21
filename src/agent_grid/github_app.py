@@ -43,7 +43,9 @@ class GitHubAppAuth:
         installation_id: str | None = None,
     ) -> None:
         self._app_id = app_id or settings.github_app_id
-        self._private_key = private_key or settings.github_app_private_key
+        raw_key = private_key or settings.github_app_private_key
+        # App Runner may inject escaped newlines from Secrets Manager
+        self._private_key = raw_key.replace("\\n", "\n") if raw_key else ""
         self._installation_id = installation_id or settings.github_app_installation_id
 
         # Cached installation token state
