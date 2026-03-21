@@ -260,15 +260,10 @@ class AgentLauncher:
         issue = await self._tracker.get_issue(repo, issue_id)
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
 
-        # Get previous session for resume
-        prev_execution = await self._db.get_execution_for_issue(issue_id)
-        resume_session_id = str(prev_execution.id) if prev_execution else None
-
         context = {
             "pr_number": pr_info["pr_number"],
             "existing_branch": pr_info["branch"],
             "review_comments": pr_info["review_comments"],
-            "resume_session_id": resume_session_id,
         }
 
         reviewer = await self.resolve_reviewer(repo, issue)
@@ -309,15 +304,10 @@ class AgentLauncher:
             )
             return
 
-        # Get previous session for resume
-        prev_execution = await self._db.get_execution_for_issue(issue_id)
-        resume_session_id = str(prev_execution.id) if prev_execution else None
-
         context = {
             "closed_pr_number": pr_info["pr_number"],
             "human_feedback": pr_info["human_feedback"],
             "what_not_to_do": checkpoint.get("context_summary", "") if checkpoint else "",
-            "resume_session_id": resume_session_id,
         }
 
         reviewer = await self.resolve_reviewer(repo, issue)
@@ -361,17 +351,12 @@ class AgentLauncher:
         issue = await self._tracker.get_issue(repo, issue_id)
         checkpoint = await self._db.get_latest_checkpoint(issue_id)
 
-        # Get previous session for resume
-        prev_execution = await self._db.get_execution_for_issue(issue_id)
-        resume_session_id = str(prev_execution.id) if prev_execution else None
-
         context = {
             "existing_branch": branch,
             "pr_number": check_info.get("pr_number"),
             "check_name": check_info.get("check_name", ""),
             "check_output": check_info.get("check_output", ""),
             "check_url": check_info.get("check_url", ""),
-            "resume_session_id": resume_session_id,
         }
 
         prompt = build_prompt(issue, repo, mode="fix_ci", context=context, checkpoint=checkpoint)
