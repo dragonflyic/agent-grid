@@ -70,7 +70,6 @@ class MockDatabase:
         return {"tokens_used": 0, "duration_seconds": 0}
 
 
-
 @pytest.fixture
 def temp_dirs():
     """Create temporary directories for issues and repos."""
@@ -148,7 +147,7 @@ class TestEndToEnd:
                     pong_file.write_text("pong")
 
                 # Yield a mock result message
-                from claude_code_sdk.types import ResultMessage
+                from claude_agent_sdk.types import ResultMessage
 
                 yield ResultMessage(
                     subtype="success",

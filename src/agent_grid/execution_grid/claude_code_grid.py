@@ -48,9 +48,7 @@ class ClaudeCodeCallbacks:
     """
 
     # Called when execution completes: (execution_id, artifacts) -> updated artifacts
-    on_execution_completed: Callable[
-        [UUID, RunArtifacts], Awaitable[RunArtifacts]
-    ] | None = None
+    on_execution_completed: Callable[[UUID, RunArtifacts], Awaitable[RunArtifacts]] | None = None
 
     # Called when execution fails: (execution_id, error_message)
     on_execution_failed: Callable[[UUID, str], Awaitable[None]] | None = None
@@ -69,9 +67,7 @@ class ClaudeCodeExecutionGrid(ExecutionGrid):
         self._executions: dict[UUID, AgentExecution] = {}
         self._machine_map: dict[UUID, str] = {}  # execution_id -> fly_machine_id
         self._callbacks = ClaudeCodeCallbacks()
-        self._handler_mapping: dict[
-            AgentEventHandler, Callable[[Event], Awaitable[None]]
-        ] = {}
+        self._handler_mapping: dict[AgentEventHandler, Callable[[Event], Awaitable[None]]] = {}
 
     def set_callbacks(self, callbacks: ClaudeCodeCallbacks) -> None:
         """Set callbacks for cross-layer operations (DB, PR detection, etc)."""
@@ -119,10 +115,7 @@ class ClaudeCodeExecutionGrid(ExecutionGrid):
             "ISSUE_NUMBER": str(issue_number or ""),
             "MODE": mode,
             "PROMPT_S3_KEY": prompt_s3_key,
-            "COORDINATOR_URL": (
-                settings.coordinator_url
-                or f"https://{settings.fly_app_name}.fly.dev"
-            ),
+            "COORDINATOR_URL": (settings.coordinator_url or f"https://{settings.fly_app_name}.fly.dev"),
             "GITHUB_TOKEN": github_token,
             "CLAUDE_CREDENTIALS_SECRET": settings.claude_credentials_secret,
             "S3_SESSION_BUCKET": settings.session_s3_bucket,
@@ -153,13 +146,9 @@ class ClaudeCodeExecutionGrid(ExecutionGrid):
             )
             machine_id = machine.get("id", "")
             self._machine_map[execution_id] = machine_id
-            logger.info(
-                f"Launched Fly Machine {machine_id} for execution {execution_id}"
-            )
+            logger.info(f"Launched Fly Machine {machine_id} for execution {execution_id}")
         except Exception as e:
-            logger.error(
-                f"Failed to launch Fly Machine for {execution_id}: {e}"
-            )
+            logger.error(f"Failed to launch Fly Machine for {execution_id}: {e}")
             execution.status = ExecutionStatus.FAILED
             execution.result = f"Launch failed: {e}"
             execution.completed_at = utc_now()
@@ -211,13 +200,9 @@ class ClaudeCodeExecutionGrid(ExecutionGrid):
             # Run completion callback (PR detection, DB updates)
             if self._callbacks.on_execution_completed:
                 try:
-                    artifacts = await self._callbacks.on_execution_completed(
-                        execution_id, artifacts
-                    )
+                    artifacts = await self._callbacks.on_execution_completed(execution_id, artifacts)
                 except Exception as e:
-                    logger.warning(
-                        f"Completion callback failed for {execution_id}: {e}"
-                    )
+                    logger.warning(f"Completion callback failed for {execution_id}: {e}")
 
             if execution:
                 execution.status = ExecutionStatus.COMPLETED
@@ -239,13 +224,9 @@ class ClaudeCodeExecutionGrid(ExecutionGrid):
             error_msg = result or "Execution failed"
             if self._callbacks.on_execution_failed:
                 try:
-                    await self._callbacks.on_execution_failed(
-                        execution_id, error_msg
-                    )
+                    await self._callbacks.on_execution_failed(execution_id, error_msg)
                 except Exception as e:
-                    logger.warning(
-                        f"Failure callback failed for {execution_id}: {e}"
-                    )
+                    logger.warning(f"Failure callback failed for {execution_id}: {e}")
 
             if execution:
                 execution.status = ExecutionStatus.FAILED
@@ -262,17 +243,11 @@ class ClaudeCodeExecutionGrid(ExecutionGrid):
         self._executions.pop(execution_id, None)
         self._machine_map.pop(execution_id, None)
 
-    async def get_execution_status(
-        self, execution_id: UUID
-    ) -> AgentExecution | None:
+    async def get_execution_status(self, execution_id: UUID) -> AgentExecution | None:
         return self._executions.get(execution_id)
 
     def get_active_executions(self) -> list[AgentExecution]:
-        return [
-            e
-            for e in self._executions.values()
-            if e.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING)
-        ]
+        return [e for e in self._executions.values() if e.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING)]
 
     async def cancel_execution(self, execution_id: UUID) -> bool:
         machine_id = self._machine_map.get(execution_id)
@@ -325,9 +300,7 @@ class ClaudeCodeExecutionGrid(ExecutionGrid):
         try:
             bucket = settings.session_s3_bucket
             if not bucket:
-                logger.warning(
-                    "No S3 session bucket configured, skipping prompt upload"
-                )
+                logger.warning("No S3 session bucket configured, skipping prompt upload")
                 return
             s3 = boto3.client("s3", region_name=settings.aws_region)
             s3.put_object(Bucket=bucket, Key=key, Body=content.encode())

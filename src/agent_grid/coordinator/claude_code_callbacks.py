@@ -16,9 +16,7 @@ logger = logging.getLogger("agent_grid.claude_code_callbacks")
 def build_claude_code_callbacks(db, tracker) -> ClaudeCodeCallbacks:
     """Build callbacks wired to the given database and issue tracker."""
 
-    async def on_execution_completed(
-        execution_id: UUID, artifacts: RunArtifacts
-    ) -> RunArtifacts:
+    async def on_execution_completed(execution_id: UUID, artifacts: RunArtifacts) -> RunArtifacts:
         """Handle successful execution — detect/create PR, persist cost, update DB."""
         # Detect or create PR if agent pushed a branch
         if artifacts.branch and artifacts.pr_number is None:
@@ -45,9 +43,7 @@ def build_claude_code_callbacks(db, tracker) -> ClaudeCodeCallbacks:
                             # Create PR as bot if mode produces PRs
                             mode = execution.mode if execution else None
                             if mode in ("implement", "retry_with_feedback"):
-                                await _create_pr(
-                                    tracker, repo, issue_id, artifacts, execution_id
-                                )
+                                await _create_pr(tracker, repo, issue_id, artifacts, execution_id)
             except Exception as e:
                 logger.warning(f"PR detection/creation failed for {execution_id}: {e}")
 
@@ -128,8 +124,7 @@ def build_claude_code_callbacks(db, tracker) -> ClaudeCodeCallbacks:
                 artifacts.pr_number = pr_data["number"]
                 artifacts.pr_url = pr_data.get("html_url")
                 logger.info(
-                    f"Created PR #{artifacts.pr_number} on {artifacts.branch} "
-                    f"for execution {execution_id} (as bot)"
+                    f"Created PR #{artifacts.pr_number} on {artifacts.branch} for execution {execution_id} (as bot)"
                 )
         except Exception as e:
             logger.warning(f"Failed to create PR for execution {execution_id}: {e}")

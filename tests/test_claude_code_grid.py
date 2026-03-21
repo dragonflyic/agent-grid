@@ -99,12 +99,8 @@ class TestClaudeCodeGrid:
         grid = self._make_grid()
         exec_id = uuid4()
 
-        completed_callback = AsyncMock(
-            return_value=RunArtifacts(result="Done")
-        )
-        grid.set_callbacks(
-            ClaudeCodeCallbacks(on_execution_completed=completed_callback)
-        )
+        completed_callback = AsyncMock(return_value=RunArtifacts(result="Done"))
+        grid.set_callbacks(ClaudeCodeCallbacks(on_execution_completed=completed_callback))
 
         # Should not raise even though exec_id is not tracked
         await grid.handle_agent_result(
@@ -128,9 +124,7 @@ class TestClaudeCodeGrid:
         )
         grid._machine_map[exec_id] = "fly-machine-123"
 
-        with patch(
-            "agent_grid.fly.machines.get_fly_client"
-        ) as mock_fly:
+        with patch("agent_grid.fly.machines.get_fly_client") as mock_fly:
             mock_client = MagicMock()
             mock_client.destroy_machine = AsyncMock()
             mock_fly.return_value = mock_client
@@ -231,9 +225,7 @@ class TestClaudeCodeGrid:
             )
             grid._machine_map[eid] = f"machine-{eid}"
 
-        with patch(
-            "agent_grid.fly.machines.get_fly_client"
-        ) as mock_fly:
+        with patch("agent_grid.fly.machines.get_fly_client") as mock_fly:
             mock_client = MagicMock()
             mock_client.destroy_machine = AsyncMock()
             mock_fly.return_value = mock_client
