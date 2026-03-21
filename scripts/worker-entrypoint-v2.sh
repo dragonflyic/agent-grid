@@ -96,14 +96,14 @@ fi
 echo "=== Running Claude Code CLI ==="
 EXIT_CODE=0
 
-# Build command
-CLAUDE_CMD="claude -p"
+# Build command arguments
+CLAUDE_ARGS=""
 if [ -n "${RESUME_SESSION_ID:-}" ]; then
-    CLAUDE_CMD="claude --resume ${RESUME_SESSION_ID} -p"
+    CLAUDE_ARGS="--resume ${RESUME_SESSION_ID} --session-id ${EXECUTION_ID}"
 fi
 
-$CLAUDE_CMD "$PROMPT" \
-    --session-id "$EXECUTION_ID" \
+claude -p "$PROMPT" \
+    $CLAUDE_ARGS \
     --model "${CLAUDE_MODEL:-claude-opus-4-6}" \
     --output-format stream-json \
     --verbose \
