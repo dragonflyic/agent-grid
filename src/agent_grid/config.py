@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     fly_worker_region: str = "iad"
     coordinator_url: str = ""  # Public URL where workers can reach the coordinator API
 
+    # S3 session storage (for Claude Code CLI worker prompts/sessions)
+    session_s3_bucket: str = ""
+    aws_region: str = "us-west-2"
+
+    # Claude Code CLI worker settings
+    claude_credentials_secret: str = ""  # AWS Secrets Manager ARN for Claude creds
+    max_turns_per_execution: int = 200
+    max_budget_per_execution_usd: float = 5.0
+
     # Anthropic API (for classification/planning)
     anthropic_api_key: str = ""
     classification_model: str = "claude-sonnet-4-5-20250929"
