@@ -208,6 +208,15 @@ class IssueTracker(ABC):
         """Find an open PR for the given head branch."""
         return None
 
+    async def post_or_update_comment(self, repo: str, issue_id: str, body: str, marker: str) -> str | None:
+        """Post a new comment or update an existing one identified by marker.
+
+        Searches existing comments for one containing the marker string.
+        If found, updates it. If not, creates a new comment.
+        Returns the comment ID.
+        """
+        return await self.add_comment(repo, issue_id, body)
+
     async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
         """Post a comment on a pull request."""
         pass

@@ -69,18 +69,22 @@ class DependencyResolver:
                 # All sub-issues are either closed or failed — no more work to do
                 if failed_subs:
                     summary = ", ".join(f"#{s.number}" for s in failed_subs)
-                    await self._tracker.add_comment(
+                    marker = "<!-- agent-grid:completion -->"
+                    await self._tracker.post_or_update_comment(
                         repo,
                         parent.id,
-                        f"Some sub-tasks failed ({summary}). Needs human review.",
+                        f"{marker}\nSome sub-tasks failed ({summary}). Needs human review.",
+                        marker,
                     )
                     await self._labels.transition_to(repo, parent.id, "ag/failed")
                     logger.info(f"Parent #{parent.number}: {len(failed_subs)} sub-issues failed")
                 else:
-                    await self._tracker.add_comment(
+                    marker = "<!-- agent-grid:completion -->"
+                    await self._tracker.post_or_update_comment(
                         repo,
                         parent.id,
-                        "All sub-tasks completed! Closing parent issue.",
+                        f"{marker}\nAll sub-tasks completed! Closing parent issue.",
+                        marker,
                     )
                     await self._tracker.update_issue_status(repo, parent.id, IssueStatus.CLOSED)
                     await self._labels.transition_to(repo, parent.id, "ag/done")

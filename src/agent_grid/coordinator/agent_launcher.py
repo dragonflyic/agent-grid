@@ -297,10 +297,12 @@ class AgentLauncher:
         if retry_count >= settings.max_retries_per_issue:
             labels = get_label_manager()
             await labels.transition_to(repo, issue_id, "ag/failed")
-            await self._tracker.add_comment(
+            marker = "<!-- agent-grid:ci-status -->"
+            await self._tracker.post_or_update_comment(
                 repo,
                 issue_id,
-                f"Max retries ({settings.max_retries_per_issue}) reached. Needs human intervention.",
+                f"{marker}\nMax retries ({settings.max_retries_per_issue}) reached. Needs human intervention.",
+                marker,
             )
             return
 

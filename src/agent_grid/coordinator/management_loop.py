@@ -113,10 +113,12 @@ class ManagementLoop:
 
             if sanity.verdict == "SKIP":
                 await labels.transition_to(repo, issue.id, "ag/skipped")
-                await self._tracker.add_comment(
+                marker = "<!-- agent-grid:skip-reason -->"
+                await self._tracker.post_or_update_comment(
                     repo,
                     issue.id,
-                    f"Skipping: {sanity.reason}",
+                    f"{marker}\nSkipping: {sanity.reason}",
+                    marker,
                 )
                 logger.info(f"Issue #{issue.number}: SKIPPED — {sanity.reason}")
                 continue
@@ -277,12 +279,15 @@ class ManagementLoop:
             await labels.add_label(repo, issue.id, "ag/proactive")
 
             owner_tag = f"@{issue.author}" if issue.author else "the issue author"
-            await self._tracker.add_comment(
+            marker = "<!-- agent-grid:proactive -->"
+            await self._tracker.post_or_update_comment(
                 repo,
                 issue.id,
+                f"{marker}\n"
                 f"I noticed this issue and I'm confident I can handle it. "
                 f"Starting work now — {owner_tag}, I'll tag you for review "
                 f"when the PR is ready.",
+                marker,
             )
 
             await self._db.merge_issue_metadata(
