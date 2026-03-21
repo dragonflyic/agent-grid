@@ -3,9 +3,10 @@
 Modes:
 - implement: Fresh implementation of an issue
 - plan: Explore repo and decompose a complex issue into sub-issues
-- scout: Explore repo and produce implementation plan/verdict without writing code
 - address_review: Address PR review comments on existing branch
 - retry_with_feedback: Retry after closed PR with human feedback
+- fix_ci: Fix failing CI checks on existing branch
+- rebase: Rebase a PR branch to resolve merge conflicts
 """
 
 from ..issue_tracker.public_api import IssueInfo
@@ -55,6 +56,16 @@ Issue #{issue.number}: {issue.title}
    - Push your branch.
    - Do NOT create a PR — the coordinator will create it automatically.
    - **EXIT immediately after pushing.** Do not continue working.
+8. Before making any code changes:
+   - Explore the codebase thoroughly. Read relevant files, understand the architecture.
+   - If you genuinely need human input (credentials, business decisions):
+     Post a comment:
+     gh issue comment {issue.number} --repo {repo} --body \\
+       "**Blocked — need clarification:**\\n\\n<your question>"
+     Then EXIT immediately. Do not attempt to implement.
+   - Post your implementation plan as a comment before coding:
+     gh issue comment {issue.number} --repo {repo} --body \\
+       "## Implementation Plan\\n\\n<your plan>"
 
 ## Git Identity
 Before making any commits, configure your git identity:
@@ -213,20 +224,8 @@ gh issue edit {issue.number} --repo {repo} --remove-label "ag/planning"
 """
 
     elif mode == "implement":
-        scout_plan = ""
-        if context and context.get("scout_plan"):
-            scout_plan = f"""
-## Implementation Plan (from scout)
-
-A scout agent has already explored the codebase and produced this plan for you.
-Follow this plan — it reflects the actual codebase state:
-
-{context["scout_plan"]}
-"""
-
         return (
             base
-            + scout_plan
             + f"""
 ## Setup
 Create and checkout a working branch:
@@ -364,83 +363,6 @@ What the previous agent run did:
 - {checkpoint.get("context_summary", "N/A")}
 """
         return prompt
-
-    elif mode == "scout":
-        return f"""You are a senior tech lead scouting a GitHub issue before any implementation begins.
-
-## Repository
-- Repo: {repo}
-
-## Issue #{issue.number}: {issue.title}
-
-{issue.body or "(no description)"}
-
-## Your Task
-
-Explore the codebase thoroughly and produce an implementation plan. Do NOT write any code or create branches.
-
-### Step 1: Deep Exploration
-- Read the README, CLAUDE.md, and key config files
-- Find ALL files relevant to this issue
-- Read the actual source code — don't just list file names
-- Understand existing tests and testing patterns
-- Check recent git history for related changes
-
-### Step 2: Feasibility Assessment
-- Can this be done in a single PR (< 300 lines changed)?
-- Are there any genuine blockers (missing credentials, unclear requirements)?
-- What's the right architectural approach?
-
-### Step 3: Produce Your Verdict
-
-After exploration, format your verdict as a JSON block between markers.
-
-First, post it as a comment on the issue so the coordinator can read it:
-```bash
-gh issue comment {issue.number} --repo {repo} --body "<!-- SCOUT_RESULT -->
-{"`" * 3}json
-<your JSON verdict here>
-{"`" * 3}
-<!-- /SCOUT_RESULT -->"
-```
-
-The JSON must have this structure:
-```json
-{{
-  "verdict": "implement" | "decompose" | "needs_human",
-  "plan": "Detailed step-by-step implementation plan.",
-  "estimated_files": ["list", "of", "files"],
-  "estimated_lines": 150,
-  "steps": [
-    {{
-      "title": "Step title (only if decompose)",
-      "description": "What this step does",
-      "files": ["files", "involved"]
-    }}
-  ],
-  "question": "Question for human (only if needs_human)",
-  "reason": "Why you chose this verdict"
-}}
-```
-
-Then EXIT immediately.
-
-### Verdict Guidelines
-- **implement**: This can be done in one PR. Provide a detailed plan.
-- **decompose**: This needs multiple sequential PRs. Provide ordered steps.
-  Each step should be independently mergeable. Later steps may build on earlier ones.
-  Keep it to 5 steps max.
-- **needs_human**: You genuinely cannot proceed without human input.
-  Only use this for things a developer with full codebase access truly cannot determine:
-  credentials, business policy decisions, choosing between fundamentally different product directions.
-
-## Rules
-- Do NOT create branches, commits, or PRs
-- Do NOT create issues
-- Do NOT modify any files
-- ONLY explore and produce your verdict
-- You MUST post your verdict as an issue comment using the gh command above
-"""
 
     elif mode == "rebase":
         pr_number = context.get("pr_number")

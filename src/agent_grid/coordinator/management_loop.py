@@ -84,7 +84,7 @@ class ManagementLoop:
         candidates = await scanner.scan(repo)
         logger.info(f"Phase 1: Found {len(candidates)} candidate issues")
 
-        # Phase 2: Sanity check and launch scouts
+        # Phase 2: Sanity check and launch agents
         classifier = get_classifier()
         budget = get_budget_manager()
         labels = get_label_manager()
@@ -121,8 +121,8 @@ class ManagementLoop:
                 logger.info(f"Issue #{issue.number}: SKIPPED — {sanity.reason}")
                 continue
 
-            # Launch scout agent
-            await launcher.launch_scout(repo, issue)
+            # Launch agent
+            await launcher.launch_simple(repo, issue)
 
         # Phase 4: Monitor in-progress
         await self._check_in_progress(repo)
@@ -273,7 +273,7 @@ class ManagementLoop:
                 )
                 continue
 
-            # Launch scout agent
+            # Launch agent
             await labels.add_label(repo, issue.id, "ag/proactive")
 
             owner_tag = f"@{issue.author}" if issue.author else "the issue author"
@@ -291,7 +291,7 @@ class ManagementLoop:
                 metadata_update={"proactive_picked": True},
             )
 
-            await launcher.launch_scout(repo, issue)
+            await launcher.launch_simple(repo, issue)
 
             picked_up += 1
 
