@@ -30,9 +30,15 @@ echo "REPO_URL: $REPO_URL"
 echo "ISSUE_NUMBER: ${ISSUE_NUMBER:-unknown}"
 echo "MODE: ${MODE:-implement}"
 
-# --- Step 1: Load subscription credentials from Secrets Manager ---
+# --- Step 1: Load subscription credentials ---
 echo "Loading Claude credentials..."
-if [ -n "${CLAUDE_CREDENTIALS_SECRET:-}" ]; then
+if [ -n "${CLAUDE_CREDENTIALS_JSON:-}" ]; then
+    # Credentials passed directly by coordinator (preferred — no AWS access needed)
+    mkdir -p ~/.claude
+    echo "$CLAUDE_CREDENTIALS_JSON" > ~/.claude/.credentials.json
+    echo "Subscription credentials loaded (from coordinator)."
+elif [ -n "${CLAUDE_CREDENTIALS_SECRET:-}" ]; then
+    # Fallback: fetch from Secrets Manager (requires AWS access)
     CREDS=$(aws secretsmanager get-secret-value \
         --region "$AWS_REGION" \
         --secret-id "$CLAUDE_CREDENTIALS_SECRET" \
@@ -40,12 +46,12 @@ if [ -n "${CLAUDE_CREDENTIALS_SECRET:-}" ]; then
     if [ -n "${CREDS:-}" ]; then
         mkdir -p ~/.claude
         echo "$CREDS" > ~/.claude/.credentials.json
-        echo "Subscription credentials loaded."
+        echo "Subscription credentials loaded (from Secrets Manager)."
     else
         echo "Warning: Could not load subscription credentials. Will use ANTHROPIC_API_KEY if set."
     fi
 else
-    echo "No CLAUDE_CREDENTIALS_SECRET set. Using ANTHROPIC_API_KEY."
+    echo "No Claude credentials available. Using ANTHROPIC_API_KEY."
 fi
 
 # --- Step 2: Configure git and gh ---
@@ -64,17 +70,14 @@ git clone "$REPO_URL" "$WORKSPACE"
 cd "$WORKSPACE"
 echo "On branch: $(git branch --show-current)"
 
-# --- Step 4: Download prompt from S3 ---
-PROMPT=""
-if [ -n "${PROMPT_S3_KEY:-}" ] && [ -n "${S3_SESSION_BUCKET:-}" ]; then
+# --- Step 4: Get prompt ---
+PROMPT="${PROMPT_TEXT:-}"
+if [ -z "$PROMPT" ] && [ -n "${PROMPT_S3_KEY:-}" ] && [ -n "${S3_SESSION_BUCKET:-}" ]; then
     echo "Downloading prompt from S3..."
-    PROMPT=$(aws s3 cp "s3://${S3_SESSION_BUCKET}/${PROMPT_S3_KEY}" - --region "$AWS_REGION" 2>/dev/null) || true
-fi
-if [ -z "$PROMPT" ] && [ -n "${PROMPT_TEXT:-}" ]; then
-    PROMPT="$PROMPT_TEXT"
+    PROMPT=$(aws s3 cp "s3://${S3_SESSION_BUCKET}/${PROMPT_S3_KEY}" - --region "${AWS_REGION:-us-west-2}" 2>/dev/null) || true
 fi
 if [ -z "$PROMPT" ]; then
-    echo "Error: No prompt available (neither S3 nor PROMPT_TEXT)"
+    echo "Error: No prompt available"
     exit 1
 fi
 

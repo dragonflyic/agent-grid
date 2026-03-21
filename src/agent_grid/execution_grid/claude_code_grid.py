@@ -108,21 +108,40 @@ class ClaudeCodeExecutionGrid(ExecutionGrid):
             logger.warning(f"Failed to get GitHub token: {e}")
             github_token = ""
 
+        # Fetch Claude credentials from Secrets Manager (coordinator has IAM access)
+        claude_credentials_json = ""
+        try:
+            import boto3
+
+            sm = boto3.client("secretsmanager", region_name=settings.aws_region)
+            resp = sm.get_secret_value(SecretId=settings.claude_credentials_secret)
+            claude_credentials_json = resp["SecretString"]
+            logger.info("Loaded Claude credentials for worker")
+        except Exception as e:
+            logger.warning(f"Could not load Claude credentials: {e}")
+
         # Build environment variables for the Fly Machine
         env: dict[str, str] = {
             "EXECUTION_ID": str(execution_id),
             "REPO_URL": config.repo_url,
             "ISSUE_NUMBER": str(issue_number or ""),
             "MODE": mode,
-            "PROMPT_S3_KEY": prompt_s3_key,
             "COORDINATOR_URL": (settings.coordinator_url or f"https://{settings.fly_app_name}.fly.dev"),
             "GITHUB_TOKEN": github_token,
-            "CLAUDE_CREDENTIALS_SECRET": settings.claude_credentials_secret,
-            "S3_SESSION_BUCKET": settings.session_s3_bucket,
             "MAX_TURNS": str(settings.max_turns_per_execution),
             "MAX_BUDGET_USD": str(settings.max_budget_per_execution_usd),
-            "AWS_REGION": settings.aws_region,
         }
+
+        # Pass Claude credentials directly (worker can't access AWS)
+        if claude_credentials_json:
+            env["CLAUDE_CREDENTIALS_JSON"] = claude_credentials_json
+
+        # Pass prompt as env var fallback (in case S3 upload failed)
+        # Fly Machines env vars have a size limit, so truncate if needed
+        if len(config.prompt) <= 50000:
+            env["PROMPT_TEXT"] = config.prompt
+        else:
+            env["PROMPT_TEXT"] = config.prompt[:50000] + "\n\n[Prompt truncated — full version in S3]"
 
         # Add fallback API key
         if settings.anthropic_api_key:
