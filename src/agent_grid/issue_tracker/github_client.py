@@ -364,6 +364,29 @@ class GitHubClient(IssueTracker):
         )
         response.raise_for_status()
 
+    async def post_or_update_comment(self, repo: str, issue_id: str, body: str, marker: str) -> str | None:
+        """Post a new comment or update an existing one identified by marker.
+
+        Searches existing comments for one containing the marker string.
+        If found, updates it. If not, creates a new comment.
+        Returns the comment ID.
+        """
+        await self._ensure_auth()
+
+        # Search existing comments for the marker
+        try:
+            comments = await self._fetch_comments(repo, issue_id)
+            for comment in comments:
+                if marker in comment.body:
+                    # Update existing comment
+                    await self.update_comment(repo, comment.id, body)
+                    return comment.id
+        except Exception:
+            pass  # Fall through to create
+
+        # No existing comment with marker — create new
+        return await self.add_comment(repo, issue_id, body)
+
     async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         """Update the status of an issue."""
         await self._ensure_auth()
