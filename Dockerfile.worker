@@ -21,14 +21,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
-
 # Install Python dependencies (only what the worker needs)
-RUN pip install --no-cache-dir claude-code-sdk httpx
+# claude-agent-sdk bundles the Claude Code CLI binary; Node.js is still needed as runtime
+RUN pip install --no-cache-dir claude-agent-sdk boto3 httpx awscli
 
 # Create non-root user (Claude Code refuses bypassPermissions as root)
 RUN useradd -m -s /bin/bash agent && chown -R agent:agent /workspace
+
+# Pre-create credentials directory for the agent user
+RUN mkdir -p /home/agent/.claude && chown -R agent:agent /home/agent/.claude
 USER agent
 
 # Copy entrypoint
