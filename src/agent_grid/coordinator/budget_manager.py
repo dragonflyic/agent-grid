@@ -28,12 +28,6 @@ class BudgetManager:
         if len(running) >= self._max_concurrent:
             return False, f"Max concurrent executions ({self._max_concurrent}) reached"
 
-        # Daily Oz run cap (only when using Oz backend)
-        if settings.execution_backend == "oz":
-            oz_today = await self._db.count_oz_runs_today()
-            if oz_today >= settings.max_oz_runs_per_day:
-                return False, f"Daily Oz run limit ({settings.max_oz_runs_per_day}) reached — {oz_today} runs today"
-
         return True, None
 
     async def get_concurrent_count(self) -> int:
@@ -46,17 +40,11 @@ class BudgetManager:
         concurrent = await self.get_concurrent_count()
         usage = await self._db.get_total_budget_usage()
 
-        oz_runs_today = 0
-        if settings.execution_backend == "oz":
-            oz_runs_today = await self._db.count_oz_runs_today()
-
         return {
             "concurrent_executions": concurrent,
             "max_concurrent": self._max_concurrent,
             "tokens_used": usage["tokens_used"],
             "duration_seconds": usage["duration_seconds"],
-            "oz_runs_today": oz_runs_today,
-            "max_oz_runs_per_day": settings.max_oz_runs_per_day,
         }
 
 

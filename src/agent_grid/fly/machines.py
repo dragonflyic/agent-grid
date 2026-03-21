@@ -93,6 +93,39 @@ class FlyMachinesClient:
         )
         return machine
 
+    async def spawn_worker_v2(
+        self,
+        execution_id: str,
+        env: dict[str, str],
+        issue_number: int = 0,
+    ) -> dict:
+        """Spawn a Fly Machine with the v2 worker entrypoint (Claude Code CLI).
+
+        Unlike spawn_worker, this accepts a pre-built env dict instead of
+        individual parameters, and uses the v2 entrypoint.
+        """
+        machine_config = {
+            "name": f"worker-{issue_number}-{int(time.time())}",
+            "config": {
+                "image": settings.fly_worker_image,
+                "env": env,
+                "guest": {
+                    "cpu_kind": "shared",
+                    "cpus": settings.fly_worker_cpus,
+                    "memory_mb": settings.fly_worker_memory_mb,
+                },
+                "auto_destroy": True,
+                "restart": {"policy": "no"},
+            },
+            "region": settings.fly_worker_region,
+        }
+        response = await self._client.post(
+            f"/apps/{self._app_name}/machines",
+            json=machine_config,
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def get_machine_status(self, machine_id: str) -> dict:
         """Get the status of a Fly Machine."""
         response = await self._client.get(

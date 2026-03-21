@@ -51,15 +51,8 @@ class Settings(BaseSettings):
     # Target repository
     target_repo: str = ""  # e.g. "myorg/myrepo"
 
-    # Execution backend: "oz" (Warp Oz) or "fly" (Fly Machines)
-    execution_backend: Literal["oz", "fly"] = "oz"
-
-    # Warp Oz configuration
-    warp_api_key: str = ""
-    oz_environment_id: str = ""
-    oz_model_id: str = "claude-sonnet-4-5-20250929"
-    oz_poll_interval_seconds: int = 30  # How often to poll Oz for run completion
-    max_oz_runs_per_day: int = 50  # Hard cap on Oz runs per day (cost control)
+    # Execution backend: "fly" (Fly Machines) or "claude-code" (Claude Code CLI)
+    execution_backend: Literal["fly", "claude-code"] = "claude-code"
 
     # Fly.io configuration (used when execution_backend="fly")
     fly_api_token: str = ""
@@ -69,6 +62,15 @@ class Settings(BaseSettings):
     fly_worker_memory_mb: int = 4096
     fly_worker_region: str = "iad"
     coordinator_url: str = ""  # Public URL where workers can reach the coordinator API
+
+    # S3 session storage (for Claude Code CLI worker prompts/sessions)
+    session_s3_bucket: str = ""
+    aws_region: str = "us-west-2"
+
+    # Claude Code CLI worker settings
+    claude_credentials_secret: str = ""  # AWS Secrets Manager ARN for Claude creds
+    max_turns_per_execution: int = 200
+    max_budget_per_execution_usd: float = 5.0
 
     # Anthropic API (for classification/planning)
     anthropic_api_key: str = ""

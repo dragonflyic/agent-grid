@@ -389,7 +389,7 @@ class Scheduler:
     # -------------------------------------------------------------------------
 
     async def _classify_and_act(self, repo: str, issue_id: str) -> None:
-        """Sanity-check an issue, then launch a scout agent."""
+        """Sanity-check an issue, then launch an agent."""
 
         can_launch, reason = await self._budget_manager.can_launch_agent()
         if not can_launch:
@@ -431,8 +431,8 @@ class Scheduler:
         from .agent_launcher import get_agent_launcher
 
         launcher = get_agent_launcher()
-        await launcher.launch_scout(repo, issue)
-        logger.info(f"Webhook: Issue #{issue.number}: launched scout")
+        await launcher.launch_simple(repo, issue)
+        logger.info(f"Webhook: Issue #{issue.number}: launched agent")
 
     # -------------------------------------------------------------------------
     # Nudge handling
@@ -527,33 +527,6 @@ class Scheduler:
                             # Planning done — transition to epic, sub-issues auto-launch
                             await labels_mgr.transition_to(repo, issue_id, "ag/epic")
                             logger.info(f"Plan completed for issue #{issue_id} — transitioned to ag/epic")
-                        elif execution.mode == "scout":
-                            # Scout done — parse result and act on verdict
-                            from .agent_launcher import get_agent_launcher
-
-                            launcher = get_agent_launcher()
-                            # Try parsing from execution result first (Fly backend)
-                            scout_result = launcher.parse_scout_result(execution.result or "")
-                            # If not found, try reading from issue comments (Oz backend posts comment)
-                            if not scout_result:
-                                scout_result = await launcher._read_scout_result_from_comments(repo, issue_id)
-                            if scout_result:
-                                await launcher.handle_scout_completed(repo, issue_id, execution.id, scout_result)
-                            else:
-                                # Scout didn't produce parseable output — fall back to implement
-                                logger.warning(
-                                    f"Issue #{issue_id}: scout result not parseable, falling back to implement"
-                                )
-                                await launcher.handle_scout_completed(
-                                    repo,
-                                    issue_id,
-                                    execution.id,
-                                    {
-                                        "verdict": "implement",
-                                        "plan": execution.result or "",
-                                        "reason": "scout output fallback",
-                                    },
-                                )
                         elif execution.mode == "rebase":
                             # Rebase done — just mark for review like implementation
                             await labels_mgr.transition_to(repo, issue_id, "ag/review-pending")
@@ -572,8 +545,8 @@ class Scheduler:
                                 await tracker.add_label(repo, str(pr_number), "ag/review-pending")
                             await self._assign_and_tag_owner(repo, issue_id, pr_number)
 
-                        # Update status comment (skip for scout/rebase — they handle their own)
-                        if execution.mode not in ("scout", "rebase"):
+                        # Update status comment (skip for rebase — it handles its own)
+                        if execution.mode != "rebase":
                             if pr_number:
                                 detail = f"PR #{pr_number} created."
                                 stage = "pr_created"

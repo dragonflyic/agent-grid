@@ -321,9 +321,6 @@ class DryRunDatabase:
     async def get_total_budget_usage(self, **kwargs) -> dict:
         return {"tokens_used": 0, "duration_seconds": 0}
 
-    async def count_oz_runs_today(self) -> int:
-        return 0
-
     # Pipeline events (audit trail)
 
     async def record_pipeline_event(
@@ -584,10 +581,6 @@ def install_dry_run_wrappers() -> None:
     # Replace execution grid
     grid_service._service = None
     grid_service._fly_grid = DryRunExecutionGrid()
-    # Reset Oz grid singleton too
-    import agent_grid.execution_grid.oz_grid as oz_mod
-
-    oz_mod._oz_grid = None
     # Also override mode so get_execution_grid returns our dry grid
     settings.deployment_mode = "coordinator"
 

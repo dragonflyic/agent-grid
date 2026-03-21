@@ -32,8 +32,34 @@ logging.basicConfig(
 logging.getLogger("agent_grid.agent").setLevel(logging.INFO)
 
 
+async def _setup_claude_credentials() -> None:
+    """Write Claude subscription credentials to ~/.claude/.credentials.json."""
+    import os
+
+    _logger = logging.getLogger("agent_grid.startup")
+    try:
+        import boto3
+
+        client = boto3.client("secretsmanager", region_name=settings.aws_region)
+        resp = client.get_secret_value(SecretId=settings.claude_credentials_secret)
+        creds_dir = os.path.expanduser("~/.claude")
+        os.makedirs(creds_dir, exist_ok=True)
+        with open(os.path.join(creds_dir, ".credentials.json"), "w") as f:
+            f.write(resp["SecretString"])
+        _logger.info("Claude subscription credentials loaded from Secrets Manager")
+    except Exception as e:
+        if settings.anthropic_api_key:
+            _logger.info(f"Claude credentials not available ({e}), will use ANTHROPIC_API_KEY")
+        else:
+            _logger.warning(f"No Claude credentials available: {e}")
+
+
 async def _connect_and_start_services(db, logger) -> None:
     """Connect to database, then start services that depend on it."""
+    # Load Claude subscription credentials from Secrets Manager
+    if settings.execution_backend == "claude-code":
+        await _setup_claude_credentials()
+
     for attempt in range(3):
         try:
             logger.info(f"Connecting to database (attempt {attempt + 1}/3)...")
@@ -65,16 +91,15 @@ async def _connect_and_start_services(db, logger) -> None:
     event_persister = get_agent_event_persister()
     await event_persister.start()
 
-    # Start Oz polling if using Oz backend — wire callbacks first
-    if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
-        from .coordinator.oz_callbacks import build_oz_callbacks
-        from .execution_grid.oz_grid import get_oz_execution_grid
+    # Claude Code CLI backend
+    if settings.deployment_mode == "coordinator" and settings.execution_backend == "claude-code":
+        from .coordinator.claude_code_callbacks import build_claude_code_callbacks
+        from .execution_grid.claude_code_grid import get_claude_code_execution_grid
         from .issue_tracker import get_issue_tracker as _get_tracker
 
-        oz_grid = get_oz_execution_grid()
-        oz_grid.set_callbacks(build_oz_callbacks(db, _get_tracker()))
-        await oz_grid.start_polling()
-        logger.info(f"Oz polling started (interval={settings.oz_poll_interval_seconds}s)")
+        cli_grid = get_claude_code_execution_grid()
+        cli_grid.set_callbacks(build_claude_code_callbacks(db, _get_tracker()))
+        logger.info("Claude Code CLI execution grid initialized")
 
     app.state.services_ready = True
     logger.info("All services started")
@@ -117,12 +142,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scheduler = get_scheduler()
     await scheduler.stop()
 
-    # Stop Oz polling and close client if active
-    if settings.deployment_mode == "coordinator" and settings.execution_backend == "oz":
-        from .execution_grid.oz_grid import get_oz_execution_grid
+    # Shutdown Claude Code backend
+    if settings.deployment_mode == "coordinator" and settings.execution_backend == "claude-code":
+        from .execution_grid.claude_code_grid import get_claude_code_execution_grid
 
-        oz_grid = get_oz_execution_grid()
-        await oz_grid.close()
+        cli_grid = get_claude_code_execution_grid()
+        await cli_grid.close()
 
     await event_bus.stop()
 

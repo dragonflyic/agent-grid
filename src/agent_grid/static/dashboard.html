@@ -469,13 +469,9 @@ async function loadOverview() {
     // Budget
     const b = data.budget || {};
     const concPct = b.max_concurrent ? Math.round((b.concurrent_executions / b.max_concurrent) * 100) : 0;
-    const ozPct = b.max_oz_runs_per_day ? Math.round((b.oz_runs_today / b.max_oz_runs_per_day) * 100) : 0;
-    const ozColor = ozPct >= 100 ? '#e74c3c' : ozPct >= 80 ? '#f39c12' : 'var(--accent)';
     document.getElementById('budget-content').innerHTML = `
       <div><strong>${b.concurrent_executions || 0}</strong> / ${b.max_concurrent || '?'} concurrent</div>
       <div class="budget-bar"><div class="budget-fill" style="width:${concPct}%"></div></div>
-      <div style="margin-top:12px"><strong>${b.oz_runs_today || 0}</strong> / ${b.max_oz_runs_per_day || '?'} Oz runs today</div>
-      <div class="budget-bar"><div class="budget-fill" style="width:${ozPct}%;background:${ozColor}"></div></div>
       <div class="budget-text">Tokens used: ${(b.tokens_used || 0).toLocaleString()}</div>`;
 
     // Classifications

@@ -6,10 +6,10 @@ import logging
 from pathlib import Path
 from uuid import UUID
 
-from claude_code_sdk import query
-from claude_code_sdk.types import (
+from claude_agent_sdk import query
+from claude_agent_sdk.types import (
     AssistantMessage,
-    ClaudeCodeOptions,
+    ClaudeAgentOptions,
     ResultMessage,
     SystemMessage,
     TextBlock,
@@ -131,7 +131,7 @@ class AgentRunner:
         Returns:
             The agent's final output.
         """
-        options = ClaudeCodeOptions(
+        options = ClaudeAgentOptions(
             cwd=work_dir,
             permission_mode=config.permission_mode,
         )
