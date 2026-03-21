@@ -342,6 +342,51 @@ class ManagementLoop:
                 # Transition label so the issue exits in-progress
                 issue_id = await self._db.get_issue_id_for_execution(execution.id)
                 if issue_id:
+                    # Attempt session resume for claude-code backend (timed-out only, not orphans)
+                    if settings.execution_backend == "claude-code" and not is_orphan:
+                        try:
+                            launcher = get_agent_launcher()
+                            issue_state = await self._db.get_issue_state(int(issue_id), repo)
+                            metadata = ensure_metadata_dict((issue_state or {}).get("metadata"))
+                            session_s3_key = metadata.get("session_s3_key")
+
+                            if session_s3_key:
+                                logger.info(f"Issue #{issue_id}: auto-resuming from session {session_s3_key}")
+                                labels = get_label_manager()
+                                await labels.transition_to(repo, issue_id, "ag/in-progress")
+                                issue_info = await self._tracker.get_issue(repo, issue_id)
+                                from .prompt_builder import build_prompt
+
+                                prompt = build_prompt(
+                                    issue_info,
+                                    repo,
+                                    mode="implement",
+                                    context={"resume_session_id": str(execution.id)},
+                                )
+                                launched = await launcher.claim_and_launch(
+                                    issue_id=issue_id,
+                                    repo_url=execution.repo_url,
+                                    prompt=prompt,
+                                    mode=execution.mode or "implement",
+                                    issue_number=int(issue_id),
+                                    context={"resume_session_id": str(execution.id)},
+                                )
+                                if launched:
+                                    await self._db.record_pipeline_event(
+                                        issue_number=int(issue_id),
+                                        repo=repo,
+                                        event_type="session_resumed",
+                                        stage="monitor",
+                                        detail={
+                                            "original_execution": str(execution.id),
+                                            "session_s3_key": session_s3_key,
+                                        },
+                                    )
+                                    logger.info(f"Issue #{issue_id}: session resumed successfully")
+                                    continue  # Skip the ag/failed transition
+                        except Exception as e:
+                            logger.warning(f"Issue #{issue_id}: session resume failed: {e}")
+
                     labels = get_label_manager()
                     try:
                         await labels.transition_to(repo, issue_id, "ag/failed")
