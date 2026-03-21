@@ -99,7 +99,7 @@ EXIT_CODE=0
 # Build command arguments
 CLAUDE_ARGS=""
 if [ -n "${RESUME_SESSION_ID:-}" ]; then
-    CLAUDE_ARGS="--resume ${RESUME_SESSION_ID} --session-id ${EXECUTION_ID}"
+    CLAUDE_ARGS="--resume ${RESUME_SESSION_ID} --session-id ${EXECUTION_ID} --fork-session"
 fi
 
 claude -p "$PROMPT" \
