@@ -61,7 +61,7 @@ git config --global user.email "3031599+agent-grid[bot]@users.noreply.github.com
 
 if [ -n "${GITHUB_TOKEN:-}" ]; then
     echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
-    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+    git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
 fi
 
 # --- Step 3: Clone repo ---
