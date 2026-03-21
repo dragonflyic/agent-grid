@@ -426,9 +426,7 @@ class Scheduler:
             labels = get_label_manager()
             await labels.transition_to(repo, issue.id, "ag/skipped")
             marker = "<!-- agent-grid:skip-reason -->"
-            await tracker.post_or_update_comment(
-                repo, issue.id, f"{marker}\nSkipping: {sanity.reason}", marker
-            )
+            await tracker.post_or_update_comment(repo, issue.id, f"{marker}\nSkipping: {sanity.reason}", marker)
             logger.info(f"Webhook: Issue #{issue.number}: SKIPPED")
             return
 
