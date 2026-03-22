@@ -1,7 +1,10 @@
-"""Post and update a single status comment on GitHub issues.
+"""Post and update comments on GitHub issues using named slots.
 
-Uses an HTML marker (<!-- agent-grid-status -->) to find its own comment
-and update it in-place, avoiding comment spam.
+Each slot (e.g., 'status', 'review-ready', 'skip-reason') gets its own
+comment, identified by an HTML marker (<!-- agent-grid:{slot} -->).
+Comment IDs are stored in issue metadata as `comment_id:{slot}`.
+
+This is the ONLY mechanism agent-grid should use to post comments.
 """
 
 import logging
@@ -15,8 +18,8 @@ MARKER = "<!-- agent-grid-status -->"
 METADATA_KEY = "status_comment_id"
 
 
-def _render_status(stage: str, detail: str | None = None) -> str:
-    """Render the status comment body with the marker."""
+def _render_status_body(stage: str, detail: str | None = None) -> str:
+    """Render the status comment body WITHOUT the marker."""
     status_map = {
         "launched": ("Working on it", "An agent has started working on this issue."),
         "planning": ("Planning", "An agent is decomposing this into sub-issues."),
@@ -59,13 +62,20 @@ def _render_status(stage: str, detail: str | None = None) -> str:
     emoji = emoji_map.get(stage, "\U0001f916")
     body = detail or default_detail
 
-    return f"""{MARKER}
-{emoji} **agent-grid status: {title}**
+    return f"""{emoji} **agent-grid status: {title}**
 
 {body}
 
 ---
 <sub>Updated by [agent-grid](https://github.com/apps/agent-grid) | [Dashboard](https://agent-grid.fly.dev)</sub>"""
+
+
+def _render_status(stage: str, detail: str | None = None) -> str:
+    """Render the status comment body with the legacy marker.
+
+    Kept for backward compatibility with tests and external callers.
+    """
+    return f"{MARKER}\n{_render_status_body(stage, detail)}"
 
 
 def _extract_comment_id(raw_metadata) -> str | None:
@@ -89,7 +99,61 @@ def _extract_comment_id(raw_metadata) -> str | None:
 
 
 class StatusCommentManager:
-    """Manages a single status comment per issue."""
+    """Manages named comment slots per issue.
+
+    Every comment posted by agent-grid goes through post_or_update_slot().
+    Each slot gets its own comment, stored in metadata as comment_id:{slot}.
+    """
+
+    async def post_or_update_slot(self, repo: str, issue_id: str, slot: str, body: str) -> None:
+        """Post or update a comment in a named slot.
+
+        Each slot (e.g., 'status', 'review-ready', 'skip-reason') gets its
+        own comment. If the slot already has a comment, it's updated in-place.
+        If not, a new comment is created and the ID is stored.
+
+        This is the ONLY way agent-grid should post comments.
+        """
+        marker = f"<!-- agent-grid:{slot} -->"
+        full_body = f"{marker}\n{body}"
+
+        db = get_database()
+        tracker = get_issue_tracker()
+
+        issue_number = int(issue_id)
+        metadata_key = f"comment_id:{slot}"
+
+        # Check DB for stored comment ID
+        state = await db.get_issue_state(issue_number, repo)
+        from .database import ensure_metadata_dict
+
+        metadata = ensure_metadata_dict((state or {}).get("metadata"))
+        comment_id = metadata.get(metadata_key)
+
+        # Backward compat: for the "status" slot, fall back to legacy key
+        if not comment_id and slot == "status":
+            comment_id = _extract_comment_id((state or {}).get("metadata"))
+
+        if comment_id:
+            try:
+                await tracker.update_comment(repo, str(comment_id), full_body)
+                logger.debug(f"Updated {slot} comment {comment_id} on issue #{issue_id}")
+                return
+            except Exception:
+                logger.warning(f"Failed to update {slot} comment {comment_id}, creating new")
+
+        # Create new comment
+        try:
+            new_id = await tracker.add_comment(repo, issue_id, full_body)
+            if new_id:
+                await db.merge_issue_metadata(
+                    issue_number=issue_number,
+                    repo=repo,
+                    metadata_update={metadata_key: new_id},
+                )
+                logger.debug(f"Created {slot} comment {new_id} on issue #{issue_id}")
+        except Exception:
+            logger.warning(f"Failed to post {slot} comment on #{issue_id}", exc_info=True)
 
     async def post_or_update(
         self,
@@ -98,39 +162,12 @@ class StatusCommentManager:
         stage: str,
         detail: str | None = None,
     ) -> None:
-        """Post a new status comment or update the existing one."""
-        body = _render_status(stage, detail)
+        """Post a new status comment or update the existing one.
 
-        db = get_database()
-        tracker = get_issue_tracker()
-
-        # Check if we already have a comment ID stored in metadata
-        issue_number = int(issue_id)
-        state = await db.get_issue_state(issue_number, repo)
-        raw_metadata = (state or {}).get("metadata")
-        comment_id = _extract_comment_id(raw_metadata)
-
-        if comment_id:
-            try:
-                await tracker.update_comment(repo, str(comment_id), body)
-                logger.debug(f"Updated status comment {comment_id} on issue #{issue_id}")
-                return
-            except Exception:
-                # Comment may have been deleted — fall through to create new one
-                logger.warning(f"Failed to update comment {comment_id}, creating new one")
-
-        # Create a new comment
-        try:
-            new_id = await tracker.add_comment(repo, issue_id, body)
-            if new_id:
-                await db.merge_issue_metadata(
-                    issue_number=issue_number,
-                    repo=repo,
-                    metadata_update={METADATA_KEY: new_id},
-                )
-                logger.debug(f"Created status comment {new_id} on issue #{issue_id}")
-        except Exception:
-            logger.warning(f"Failed to post status comment on issue #{issue_id}", exc_info=True)
+        Delegates to post_or_update_slot with slot='status'.
+        """
+        body = _render_status_body(stage, detail)
+        await self.post_or_update_slot(repo, issue_id, "status", body)
 
 
 _status_comment_manager: StatusCommentManager | None = None

@@ -351,15 +351,14 @@ class Scheduler:
         ci_fix_count = metadata.get("ci_fix_count", 0)
         if ci_fix_count >= settings.max_ci_fix_retries:
             logger.warning(f"Issue #{issue_id}: CI fix retry limit ({settings.max_ci_fix_retries}) reached")
-            tracker = get_issue_tracker()
+            from .status_comment import get_status_comment_manager
+
             check_name = payload.get("check_name")
-            marker = "<!-- agent-grid:ci-status -->"
             body = (
-                f"{marker}\n"
                 f"CI check `{check_name}` keeps failing after "
                 f"{ci_fix_count} auto-fix attempts. Needs human intervention."
             )
-            await tracker.post_or_update_comment(repo, issue_id, body, marker)
+            await get_status_comment_manager().post_or_update_slot(repo, issue_id, "ci-status", body)
             labels_mgr = get_label_manager()
             await labels_mgr.transition_to(repo, issue_id, "ag/failed")
             return
@@ -425,8 +424,11 @@ class Scheduler:
         if sanity.verdict == "SKIP":
             labels = get_label_manager()
             await labels.transition_to(repo, issue.id, "ag/skipped")
-            marker = "<!-- agent-grid:skip-reason -->"
-            await tracker.post_or_update_comment(repo, issue.id, f"{marker}\nSkipping: {sanity.reason}", marker)
+            from .status_comment import get_status_comment_manager
+
+            await get_status_comment_manager().post_or_update_slot(
+                repo, issue.id, "skip-reason", f"Skipping: {sanity.reason}"
+            )
             logger.info(f"Webhook: Issue #{issue.number}: SKIPPED")
             return
 
@@ -577,23 +579,25 @@ class Scheduler:
 
             await tracker.assign_issue(repo, issue_id, issue.author)
 
+            from .status_comment import get_status_comment_manager
+
+            mgr = get_status_comment_manager()
+
             if pr_number:
                 await tracker.request_pr_reviewers(repo, pr_number, [issue.author])
-                marker = "<!-- agent-grid:review-ready -->"
-                await tracker.post_or_update_comment(
+                await mgr.post_or_update_slot(
                     repo,
                     str(pr_number),
-                    f"{marker}\n@{issue.author} — this PR is ready for your review.",
-                    marker,
+                    "review-ready",
+                    f"@{issue.author} — this PR is ready for your review.",
                 )
 
             pr_ref = f" PR #{pr_number}" if pr_number else ""
-            marker = "<!-- agent-grid:review-ready -->"
-            await tracker.post_or_update_comment(
+            await mgr.post_or_update_slot(
                 repo,
                 issue_id,
-                f"{marker}\n@{issue.author} — implementation is ready for your review.{pr_ref}",
-                marker,
+                "review-ready",
+                f"@{issue.author} — implementation is ready for your review.{pr_ref}",
             )
             logger.info(f"Issue #{issue_id}: assigned to @{issue.author}, requested review on PR #{pr_number}")
         except Exception as e:

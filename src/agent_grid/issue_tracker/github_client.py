@@ -364,29 +364,6 @@ class GitHubClient(IssueTracker):
         )
         response.raise_for_status()
 
-    async def post_or_update_comment(self, repo: str, issue_id: str, body: str, marker: str) -> str | None:
-        """Post a new comment or update an existing one identified by marker.
-
-        Searches existing comments for one containing the marker string.
-        If found, updates it. If not, creates a new comment.
-        Returns the comment ID.
-        """
-        await self._ensure_auth()
-
-        # Search existing comments for the marker
-        try:
-            comments = await self._fetch_comments(repo, issue_id)
-            for comment in comments:
-                if marker in comment.body:
-                    # Update existing comment
-                    await self.update_comment(repo, comment.id, body)
-                    return comment.id
-        except Exception:
-            pass  # Fall through to create
-
-        # No existing comment with marker — create new
-        return await self.add_comment(repo, issue_id, body)
-
     async def update_issue_status(self, repo: str, issue_id: str, status: IssueStatus) -> None:
         """Update the status of an issue."""
         await self._ensure_auth()
@@ -497,17 +474,6 @@ class GitHubClient(IssueTracker):
         except Exception as e:
             logger.warning(f"Failed to look up PR for branch {branch}: {e}")
             return None
-
-    async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
-        """Post a comment on a pull request."""
-        await self._ensure_auth()
-        try:
-            await self._client.post(
-                f"/repos/{repo}/issues/{pr_number}/comments",
-                json={"body": body},
-            )
-        except Exception as e:
-            logger.warning(f"Failed to comment on PR #{pr_number}: {e}")
 
     async def get_check_runs_for_ref(
         self,
