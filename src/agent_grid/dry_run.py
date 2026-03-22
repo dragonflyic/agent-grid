@@ -180,13 +180,6 @@ class DryRunIssueTracker(IssueTracker):
     async def request_pr_reviewers(self, repo: str, pr_number: int, reviewers: list[str]) -> None:
         self._log.log("request_pr_reviewers", repo=repo, pr_number=pr_number, reviewers=reviewers)
 
-    async def post_or_update_comment(self, repo: str, issue_id: str, body: str, marker: str) -> str | None:
-        self._log.log("post_or_update_comment", repo=repo, issue_id=issue_id, marker=marker, body=body[:500])
-        return None
-
-    async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
-        self._log.log("add_pr_comment", repo=repo, pr_number=pr_number, body=body[:500])
-
     async def close(self) -> None:
         await self._real.close()
 
@@ -600,9 +593,11 @@ def install_dry_run_wrappers() -> None:
     import agent_grid.coordinator.proactive_scanner as proactive_scanner_mod
     import agent_grid.coordinator.quality_gate as quality_gate_mod
     import agent_grid.coordinator.scanner as scanner_mod
+    import agent_grid.coordinator.status_comment as status_comment_mod
     import agent_grid.issue_tracker.project_manager as project_mod
 
     launcher_mod._agent_launcher = None
+    status_comment_mod._status_comment_manager = None
     ci_monitor_mod._ci_monitor = None
     project_mod._project_manager = None
     settings.github_project_number = None  # Disable Projects in dry-run

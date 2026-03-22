@@ -547,7 +547,11 @@ class TestPlannerBlockedBy:
 
         from unittest.mock import patch
 
-        with patch("agent_grid.coordinator.planner.embed_metadata", side_effect=lambda text, meta: text):
+        mock_status_mgr = AsyncMock()
+        with (
+            patch("agent_grid.coordinator.planner.embed_metadata", side_effect=lambda text, meta: text),
+            patch("agent_grid.coordinator.status_comment.get_status_comment_manager", return_value=mock_status_mgr),
+        ):
             result = await planner.decompose("owner/repo", 1, "Parent", "Body")
 
         assert len(result) == 2
