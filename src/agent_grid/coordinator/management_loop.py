@@ -459,12 +459,15 @@ class ManagementLoop:
         failed = [i for i in all_open if "ag/failed" in i.labels]
 
         if not failed:
+            logger.info("Phase 4c: No failed issues to retry")
             return
 
+        logger.info(f"Phase 4c: Found {len(failed)} failed issues to consider for retry")
         budget = get_budget_manager()
         labels = get_label_manager()
         launcher = get_agent_launcher()
         retried = 0
+        skipped_max_retries = 0
 
         for issue in failed:
             if retried >= settings.max_auto_retries_per_cycle:
@@ -479,6 +482,7 @@ class ManagementLoop:
             issue_state = await self._db.get_issue_state(issue.number, repo)
             retry_count = (issue_state or {}).get("retry_count", 0)
             if retry_count >= settings.max_retries_per_issue:
+                skipped_max_retries += 1
                 continue
 
             if await launcher.has_active_execution(str(issue.number)):
@@ -528,8 +532,8 @@ class ManagementLoop:
                 except Exception:
                     pass
 
-        if retried:
-            logger.info(f"Phase 4c: Auto-retried {retried} failed issues")
+        if retried or skipped_max_retries:
+            logger.info(f"Phase 4c: Auto-retried {retried} issues, skipped {skipped_max_retries} (max retries reached)")
 
     async def _check_merge_conflicts(self, repo: str, launcher) -> None:
         """Phase 5b: Check open agent PRs for merge conflicts.
