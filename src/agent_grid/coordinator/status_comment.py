@@ -142,6 +142,26 @@ class StatusCommentManager:
             except Exception:
                 logger.warning(f"Failed to update {slot} comment {comment_id}, creating new")
 
+        # Fallback: search existing comments for marker (handles race conditions
+        # where two calls create comments before either stores the ID)
+        # Also checks legacy marker format (agent-grid-status vs agent-grid:status)
+        legacy_marker = f"<!-- agent-grid-{slot} -->" if slot == "status" else None
+        try:
+            issue_info = await tracker.get_issue(repo, issue_id)
+            for comment in reversed(issue_info.comments):
+                if marker in comment.body or (legacy_marker and legacy_marker in comment.body):
+                    # Found existing comment — update it and store the ID
+                    await tracker.update_comment(repo, comment.id, full_body)
+                    await db.merge_issue_metadata(
+                        issue_number=issue_number,
+                        repo=repo,
+                        metadata_update={metadata_key: comment.id},
+                    )
+                    logger.debug(f"Found existing {slot} comment {comment.id} via marker search")
+                    return
+        except Exception:
+            pass  # Fall through to create
+
         # Create new comment
         try:
             new_id = await tracker.add_comment(repo, issue_id, full_body)
