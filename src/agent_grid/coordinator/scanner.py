@@ -28,7 +28,9 @@ HANDLED_LABELS = {
     "ag/failed",
     "ag/skipped",
     "ag/epic",
-    "ag/proactive",
+    # Note: ag/proactive is NOT here — it's a marker label indicating how
+    # the issue was picked up, not a pipeline state. Issues with ag/proactive
+    # + ag/todo should still be scanned.
 }
 
 AG_PREFIX = "ag/"
