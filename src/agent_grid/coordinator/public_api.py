@@ -305,6 +305,25 @@ async def reset_ci_fix_count(issue_number: int, repo: str | None = None) -> dict
     return {"status": "reset", "issue_number": issue_number}
 
 
+@coordinator_router.post("/issue-state/{issue_number}/reset-proactive")
+async def reset_proactive_flags(issue_number: int, repo: str | None = None) -> dict[str, Any]:
+    """Reset proactive scanner flags so the issue gets re-evaluated."""
+    from ..config import settings
+    from .database import ensure_metadata_dict, get_database
+
+    db = get_database()
+    actual_repo = repo or settings.target_repo
+    state = await db.get_issue_state(issue_number, actual_repo)
+    if not state:
+        # No state = never evaluated, nothing to reset
+        return {"status": "no_state", "issue_number": issue_number}
+    metadata = ensure_metadata_dict(state.get("metadata"))
+    metadata.pop("proactive_skipped", None)
+    metadata.pop("proactive_picked", None)
+    await db.upsert_issue_state(issue_number=issue_number, repo=actual_repo, metadata=metadata)
+    return {"status": "reset", "issue_number": issue_number}
+
+
 @coordinator_router.get("/budget")
 async def get_budget_status() -> dict[str, Any]:
     """
