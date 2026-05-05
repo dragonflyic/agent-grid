@@ -9,7 +9,6 @@ ENV_FILE="$PROJECT_DIR/.env.worker"
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "Error: $ENV_FILE not found."
-    echo "Run ./scripts/setup-local-worker.sh first."
     exit 1
 fi
 

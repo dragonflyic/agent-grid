@@ -9,4 +9,3 @@ GitHub issues.
   starting coding agent executions
 - `src/agent_grid/execution_grid/`: Service that actually starts and manages the coding
   agent executions
-- `infrastructure/terraform/`: Terraform configuration for production AWS deploy
